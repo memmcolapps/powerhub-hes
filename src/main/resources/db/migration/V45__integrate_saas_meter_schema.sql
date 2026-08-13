@@ -1,4 +1,38 @@
--- 1. Create meter_integrations table if not exists
+-- 1. Create organisations table if not exists
+CREATE TABLE IF NOT EXISTS public.organisations (
+    id UUID NOT NULL,
+    version BIGINT NOT NULL DEFAULT 0,
+    created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    created_by UUID,
+    updated_by UUID,
+    name CHARACTER VARYING(150) NOT NULL,
+    email CHARACTER VARYING(255) NOT NULL,
+    dial_code CHARACTER VARYING(10) NOT NULL,
+    phone CHARACTER VARYING(30) NOT NULL,
+    active BOOLEAN NOT NULL DEFAULT TRUE,
+    status_reason CHARACTER VARYING(1000),
+    timezone CHARACTER VARYING(50) DEFAULT 'UTC',
+    CONSTRAINT organisations_pkey PRIMARY KEY (id),
+    CONSTRAINT uk_organisations_email UNIQUE (email)
+);
+
+-- 2. Copy existing data from organizations to organisations if any
+INSERT INTO public.organisations (id, version, created_at, updated_at, name, email, dial_code, phone, active)
+SELECT
+    CAST(id AS UUID),
+    0,
+    created_at,
+    updated_at,
+    business_name,
+    LOWER(REPLACE(business_name, ' ', '')) || '@example.com',
+    '+234',
+    '1234567890',
+    TRUE
+FROM public.organizations
+ON CONFLICT (email) DO NOTHING;
+
+-- 3. Create meter_integrations table if not exists
 CREATE TABLE IF NOT EXISTS public.meter_integrations (
     id UUID NOT NULL,
     version BIGINT NOT NULL DEFAULT 0,
@@ -29,14 +63,14 @@ CREATE TABLE IF NOT EXISTS public.meter_integrations (
     CONSTRAINT uk_meter_integration_manufacturer_model UNIQUE (manufacturer, model)
 );
 
--- 2. Add organisation_id and meter_integration_id to public.meters table if not exists
+-- 4. Add organisation_id and meter_integration_id to public.meters table if not exists
 ALTER TABLE public.meters ADD COLUMN IF NOT EXISTS organisation_id UUID;
 ALTER TABLE public.meters ADD COLUMN IF NOT EXISTS meter_integration_id UUID;
 
--- 3. Populate organisation_id from org_id where organisation_id is NULL
+-- 5. Populate organisation_id from org_id where organisation_id is NULL
 UPDATE public.meters SET organisation_id = CAST(org_id AS UUID) WHERE organisation_id IS NULL AND org_id IS NOT NULL;
 
--- 4. Create and associate meter_integrations for existing meters
+-- 6. Create and associate meter_integrations for existing meters
 DO $$
 DECLARE
     r RECORD;
@@ -97,6 +131,13 @@ BEGIN
     END LOOP;
 END $$;
 
--- 5. Enforce NOT NULL constraints on newly populated foreign keys for data integrity
+-- 7. Enforce NOT NULL constraints and foreign key references for database integrity
 ALTER TABLE public.meters ALTER COLUMN organisation_id SET NOT NULL;
 ALTER TABLE public.meters ALTER COLUMN meter_integration_id SET NOT NULL;
+
+-- 8. Add Foreign Key constraints matching SaaS relationships
+ALTER TABLE public.meters DROP CONSTRAINT IF EXISTS meters_organisation_id_fkey;
+ALTER TABLE public.meters ADD CONSTRAINT meters_organisation_id_fkey FOREIGN KEY (organisation_id) REFERENCES public.organisations (id) ON DELETE NO ACTION;
+
+ALTER TABLE public.meters DROP CONSTRAINT IF EXISTS meters_meter_integration_id_fkey;
+ALTER TABLE public.meters ADD CONSTRAINT meters_meter_integration_id_fkey FOREIGN KEY (meter_integration_id) REFERENCES public.meter_integrations (id) ON DELETE NO ACTION;
