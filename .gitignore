@@ -1,0 +1,63 @@
+HELP.md
+target/
+deployment/
+!.mvn/wrapper/maven-wrapper.jar
+!**/src/main/**/target/
+!**/src/test/**/target/
+
+# Local override configs (if you ever create these for local dev)
+application-dev.properties.yml
+**/application-dev.properties.yml
+
+application-local.properties.yml
+**/application-local.properties.yml
+
+### STS ###
+.apt_generated
+.classpath
+.factorypath
+.project
+.settings
+.springBeans
+.sts4-cache
+
+### IntelliJ IDEA ###
+.idea/
+*.iws
+*.iml
+*.ipr
+
+### NetBeans ###
+/nbproject/private/
+/nbbuild/
+/dist/
+/nbdist/
+/.nb-gradle/
+build/
+!**/src/main/**/build/
+!**/src/test/**/build/
+
+### VS Code ###
+.vscode/
+
+### Flyway config
+flyway.conf
+
+# macOS
+.DS_Store
+._*
+.AppleDouble
+.LSOverride
+
+# Maven
+target/
+
+# Logs
+logs/
+*.log
+
+# OS / temp
+tmp/
+
+### Cursor ###
+.cursor/

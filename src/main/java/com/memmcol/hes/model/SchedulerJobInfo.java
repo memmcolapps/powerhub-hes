@@ -1,0 +1,82 @@
+package com.memmcol.hes.model;
+
+import com.fasterxml.jackson.annotation.JsonAlias;
+import jakarta.persistence.Entity;
+import jakarta.persistence.GeneratedValue;
+import jakarta.persistence.GenerationType;
+import jakarta.persistence.Id;
+import jakarta.persistence.Table;
+import jakarta.persistence.Column;
+
+import lombok.Getter;
+import lombok.Setter;
+import lombok.ToString;
+
+import java.time.LocalDateTime;
+
+@ToString
+@Getter
+@Setter
+@Entity
+@Table(name = "scheduler_job_info")
+public class SchedulerJobInfo {
+
+    @Id
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    @Column(name = "job_id")
+    private Long jobId;
+
+    @Column(name = "name")
+    private String name;
+
+    @Column(name = "job_name")
+    private String jobName;
+
+    @Column(name = "job_group")
+    private String jobGroup;
+
+    @Column(name = "job_status")
+    private String jobStatus;
+
+    @Column(name = "job_class")
+    private String jobClass;
+
+    @Column(name = "cron_expression")
+    private String cronExpression;
+
+    @Column(name = "description")
+    private String description;
+
+    @Column(name = "interface_name")
+    private String interfaceName;
+
+    @Column(name = "repeat_time") // fallback, optional
+    private Long repeatTime;
+
+    @Column(name = "cron_job")
+    private Boolean cronJob;
+
+    @Column(name = "repeat_seconds")
+    private Integer repeatSeconds;
+
+    @Column(name = "repeat_minutes")
+    private Integer repeatMinutes;
+
+    @Column(name = "repeat_hours")
+    private Integer repeatHours;
+
+    @Column(name = "last_run_time")
+    private LocalDateTime lastRunTime;
+
+    @Column(name = "obis_codes")
+    private String obisCodes;     // store as comma-separated string e.g. "1.0.99.1.0.255,1.0.99.2.0.255"
+
+    /**
+     * Optional household-tier OBIS for jobs that use category-specific event reads (e.g. token events).
+     * Propagated to Quartz JobDataMap as {@code obisCodesHousehold}.
+     */
+    @JsonAlias("obis_codes_household")
+    @Column(name = "obis_codes_household")
+    private String obisCodesHousehold;
+
+}
