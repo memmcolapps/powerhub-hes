@@ -14,7 +14,10 @@ class SaaSMeterIntegrationTest {
     @Test
     void testMeterModelAndRelationshipBuilders() {
         Organisation org = Organisation.builder()
-                .businessName("Test Organisation")
+                .name("Test Organisation")
+                .email("test@example.com")
+                .dialCode("+234")
+                .phone("1234567890")
                 .build();
         org.setId(UUID.randomUUID());
 
@@ -60,7 +63,7 @@ class SaaSMeterIntegrationTest {
 
         // Verify relationships
         assertNotNull(meter.getOrganisation());
-        assertEquals("Test Organisation", meter.getOrganisation().getBusinessName());
+        assertEquals("Test Organisation", meter.getOrganisation().getName());
         assertNotNull(meter.getMeterIntegration());
         assertEquals("MEMMCOL", meter.getMeterIntegration().getManufacturer());
         assertEquals("MMX-313-CT", meter.getMeterIntegration().getModel());
