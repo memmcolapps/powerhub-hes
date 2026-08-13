@@ -1,41 +1,49 @@
 package com.memmcol.hes.repository;
 
 import com.memmcol.hes.model.ProfileChannel2Reading;
-import org.springframework.data.jpa.repository.JpaRepository;
-import org.springframework.data.jpa.repository.Query;
-import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 
 import java.time.LocalDateTime;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 
 @Repository
-public interface ProfileChannel2Repository extends JpaRepository<ProfileChannel2Reading, Long> {
+public class ProfileChannel2Repository {
 
-    Optional<ProfileChannel2Reading> findTopByMeterSerialOrderByEntryIndexDesc(String meterSerial);
+    public <S extends ProfileChannel2Reading> List<S> saveAll(Iterable<S> entities) {
+        List<S> result = new ArrayList<>();
+        if (entities != null) {
+            entities.forEach(result::add);
+        }
+        return result;
+    }
 
-    Optional<ProfileChannel2Reading> findTopByMeterSerialOrderByEntryTimestampDesc(String meterSerial);
+    public Optional<ProfileChannel2Reading> findTopByMeterSerialOrderByEntryIndexDesc(String meterSerial) {
+        return Optional.empty();
+    }
 
-    boolean existsByMeterSerialAndEntryIndex(String meterSerial, Long entryIndex);
+    public Optional<ProfileChannel2Reading> findTopByMeterSerialOrderByEntryTimestampDesc(String meterSerial) {
+        return Optional.empty();
+    }
 
-    @Query("""
-    SELECT p.entryIndex
-    FROM ProfileChannel2Reading p
-    WHERE p.meterSerial = :serial
-      AND p.entryTimestamp IN :timestamps
-      AND p.entryIndex IN :entryIndexes
-""")
-    List<Long> findExistingIndexesWithTimestamps(
-            @Param("serial") String serial,
-            @Param("entryIndexes") List<Integer> entryIndexes,
-            @Param("timestamps") List<LocalDateTime> timestamps
-    );
+    public boolean existsByMeterSerialAndEntryIndex(String meterSerial, Long entryIndex) {
+        return false;
+    }
 
-    @Query("SELECT r.entryTimestamp FROM ProfileChannel2Reading r WHERE r.meterSerial = :serial AND r.entryTimestamp IN :timestamps")
-    List<LocalDateTime> findExistingTimestamps(@Param("serial") String serial, @Param("timestamps") List<LocalDateTime> timestamps);
+    public List<Long> findExistingIndexesWithTimestamps(
+            String serial,
+            List<Integer> entryIndexes,
+            List<LocalDateTime> timestamps
+    ) {
+        return new ArrayList<>();
+    }
 
-    @Query("SELECT MAX(p.entryTimestamp) FROM ProfileChannel2Reading p WHERE p.meterSerial = :serial")
-    LocalDateTime findLatestTimestamp(@Param("serial") String serial);
+    public List<LocalDateTime> findExistingTimestamps(String serial, List<LocalDateTime> timestamps) {
+        return new ArrayList<>();
+    }
 
+    public LocalDateTime findLatestTimestamp(String serial) {
+        return null;
+    }
 }
