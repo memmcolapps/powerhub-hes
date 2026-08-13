@@ -1,27 +1,32 @@
 -- 1. Create meter_integrations table if not exists
 CREATE TABLE IF NOT EXISTS public.meter_integrations (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    manufacturer VARCHAR(255) NOT NULL,
-    model VARCHAR(255) NOT NULL,
-    class VARCHAR(255) NOT NULL,
-    category VARCHAR(255) NOT NULL,
-    protocol VARCHAR(255) NOT NULL,
-    authentication_type VARCHAR(255) NOT NULL,
-    password VARCHAR(255),
-    serial VARCHAR(100),
-    multiplier VARCHAR(50),
-    security_policy VARCHAR(100),
-    auth_mechanism VARCHAR(100),
-    encryption_key VARCHAR(255),
-    master_key VARCHAR(255),
-    global_broadcast_encryption_key VARCHAR(255),
-    destination_address VARCHAR(255),
-    client_id VARCHAR(100),
-    description VARCHAR(1000),
-    status VARCHAR(50) NOT NULL DEFAULT 'ACTIVE',
-    status_reason VARCHAR(1000),
-    created_at TIMESTAMP WITHOUT TIME ZONE NOT NULL DEFAULT NOW(),
-    updated_at TIMESTAMP WITHOUT TIME ZONE NOT NULL DEFAULT NOW()
+    id UUID NOT NULL,
+    version BIGINT NOT NULL DEFAULT 0,
+    created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    created_by UUID,
+    updated_by UUID,
+    manufacturer CHARACTER VARYING(255) NOT NULL,
+    model CHARACTER VARYING(255) NOT NULL,
+    class CHARACTER VARYING(255) NOT NULL,
+    category CHARACTER VARYING(255) NOT NULL,
+    protocol CHARACTER VARYING(255) NOT NULL,
+    authentication_type CHARACTER VARYING(255) NOT NULL,
+    password CHARACTER VARYING(255),
+    description CHARACTER VARYING(1000),
+    status CHARACTER VARYING(50) NOT NULL DEFAULT 'ACTIVE'::character varying,
+    status_reason CHARACTER VARYING(1000),
+    serial CHARACTER VARYING(100),
+    multiplier CHARACTER VARYING(50),
+    security_policy CHARACTER VARYING(100),
+    auth_mechanism CHARACTER VARYING(100),
+    encryption_key CHARACTER VARYING(255),
+    master_key CHARACTER VARYING(255),
+    global_broadcast_encryption_key CHARACTER VARYING(255),
+    destination_address CHARACTER VARYING(255),
+    client_id CHARACTER VARYING(100),
+    CONSTRAINT meter_integrations_pkey PRIMARY KEY (id),
+    CONSTRAINT uk_meter_integration_manufacturer_model UNIQUE (manufacturer, model)
 );
 
 -- 2. Add organisation_id and meter_integration_id to public.meters table if not exists
@@ -35,6 +40,7 @@ UPDATE public.meters SET organisation_id = CAST(org_id AS UUID) WHERE organisati
 DO $$
 DECLARE
     r RECORD;
+    existing_integration_id UUID;
     new_integration_id UUID;
     man_name VARCHAR;
 BEGIN
@@ -45,32 +51,52 @@ BEGIN
         LEFT JOIN public.smart_meter_info s ON m.id = s.meter_id
         WHERE m.meter_integration_id IS NULL
     LOOP
-        new_integration_id := gen_random_uuid();
-
         -- Get manufacturer name from UUID reference if present
         SELECT name INTO man_name FROM public.manufacturers WHERE id = r.meter_manufacturer;
         IF man_name IS NULL THEN
             man_name := 'GENERIC';
         END IF;
 
-        INSERT INTO public.meter_integrations (
-            id, manufacturer, model, class, category, protocol, authentication_type, password, serial, created_at, updated_at
-        ) VALUES (
-            new_integration_id,
-            man_name,
-            COALESCE(r.meter_model, 'GENERIC'),
-            COALESCE(r.meter_class, 'GENERIC'),
-            COALESCE(r.meter_category, 'GENERIC'),
-            COALESCE(r.protocol, 'TCP'),
-            COALESCE(r.authentication, 'NONE'),
-            r.password,
-            r.meter_number,
-            NOW(),
-            NOW()
-        );
+        -- Check if an integration with the same manufacturer and model already exists
+        SELECT id INTO existing_integration_id
+        FROM public.meter_integrations
+        WHERE manufacturer = man_name AND model = COALESCE(r.meter_model, 'GENERIC')
+        LIMIT 1;
 
-        UPDATE public.meters
-        SET meter_integration_id = new_integration_id
-        WHERE id = r.meter_id;
+        IF existing_integration_id IS NOT NULL THEN
+            -- Use the existing integration ID
+            UPDATE public.meters
+            SET meter_integration_id = existing_integration_id
+            WHERE id = r.meter_id;
+        ELSE
+            -- Generate a new UUID and insert
+            new_integration_id := gen_random_uuid();
+
+            INSERT INTO public.meter_integrations (
+                id, version, created_at, updated_at, manufacturer, model, class, category, protocol, authentication_type, password, serial, status
+            ) VALUES (
+                new_integration_id,
+                0,
+                NOW(),
+                NOW(),
+                man_name,
+                COALESCE(r.meter_model, 'GENERIC'),
+                COALESCE(r.meter_class, 'GENERIC'),
+                COALESCE(r.meter_category, 'GENERIC'),
+                COALESCE(r.protocol, 'TCP'),
+                COALESCE(r.authentication, 'NONE'),
+                r.password,
+                r.meter_number,
+                'ACTIVE'
+            );
+
+            UPDATE public.meters
+            SET meter_integration_id = new_integration_id
+            WHERE id = r.meter_id;
+        END IF;
     END LOOP;
 END $$;
+
+-- 5. Enforce NOT NULL constraints on newly populated foreign keys for data integrity
+ALTER TABLE public.meters ALTER COLUMN organisation_id SET NOT NULL;
+ALTER TABLE public.meters ALTER COLUMN meter_integration_id SET NOT NULL;

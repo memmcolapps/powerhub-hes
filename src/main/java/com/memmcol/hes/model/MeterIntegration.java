@@ -3,10 +3,13 @@ package com.memmcol.hes.model;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.Table;
+import jakarta.persistence.UniqueConstraint;
 import lombok.*;
 
 @Entity
-@Table(name = "meter_integrations")
+@Table(name = "meter_integrations", uniqueConstraints = {
+    @UniqueConstraint(name = "uk_meter_integration_manufacturer_model", columnNames = {"manufacturer", "model"})
+})
 @Getter
 @Setter
 @NoArgsConstructor
