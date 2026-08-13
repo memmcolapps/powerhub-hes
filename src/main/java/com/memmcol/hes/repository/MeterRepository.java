@@ -1,8 +1,7 @@
 package com.memmcol.hes.repository;
 
 import com.memmcol.hes.dto.MeterDTO;
-import com.memmcol.hes.model.MetersConnectionEvent;
-import com.memmcol.hes.model.MetersEntity;
+import com.memmcol.hes.model.Meter;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
@@ -13,19 +12,19 @@ import java.util.Optional;
 import java.util.UUID;
 
 @Repository
-public interface MeterRepository extends JpaRepository<MetersEntity, UUID> {
+public interface MeterRepository extends JpaRepository<Meter, UUID> {
 
     // Fetch only meters whose serial numbers are in the given set
     @Query("""
        SELECT new com.memmcol.hes.dto.MeterDTO(
            m.meterNumber,
-           s.meterModel,
-           m.meterClass,
+           mi.model,
+           mi.meterClass,
            false,
            m.createdAt
            )
-       FROM MetersEntity m
-       JOIN m.smartMeterInfo s
+       FROM Meter m
+       JOIN m.meterIntegration mi
        WHERE m.meterNumber = :meterNumber
        """)
     Optional<MeterDTO> findMeterDetailsByMeterNumber(@Param("meterNumber") String meterNumber);
@@ -33,24 +32,24 @@ public interface MeterRepository extends JpaRepository<MetersEntity, UUID> {
     @Query("""
        SELECT new com.memmcol.hes.dto.MeterDTO(
            m.meterNumber,
-           s.meterModel,
-           m.meterClass,
+           mi.model,
+           mi.meterClass,
            false,
            m.createdAt
            )
-       FROM MetersEntity m
-       JOIN m.smartMeterInfo s
+       FROM Meter m
+       JOIN m.meterIntegration mi
        WHERE m.meterNumber IN :meterNumbers
        """)
     List<MeterDTO> findMeterDetailsByMeterNumberIn(@Param("meterNumbers") List<String> meterNumbers);
 
     /*✅ Purpose:
 	•	Retrieves all meter numbers with their corresponding models.
-	•	Joins meters with smart_meter_info.*/
+	•	Joins meters with meter_integrations.*/
     @Query("""
-        SELECT m.meterNumber, s.meterModel
-        FROM MetersEntity m
-        JOIN SmartMeterInfo s ON m.id = s.meter.id
+        SELECT m.meterNumber, mi.model
+        FROM Meter m
+        JOIN m.meterIntegration mi
     """)
     List<Object[]> findAllMeterModels();
 

@@ -20,7 +20,6 @@ import java.util.stream.Collectors;
 @Service
 @RequiredArgsConstructor
 public class DashboardAsyncService {
-    private final SmartMeterRepository smartMeterRepository;
     private final NettyServerHolder holder;
     private final MetersConnectionEventRepository connectionEventRepository;
     private final SchedulerRepository schedulerRepository;
@@ -40,7 +39,7 @@ public class DashboardAsyncService {
     public CompletableFuture<DashboardSummaryResponse.MeterSummary> getMeterSummaryAsync() {
         log.info("🔄 Fetching meter summary from DB …");
         try {
-            int total = safeInt(smartMeterRepository.countAll());
+            int total = safeInt(meterRepository.count());
             int online = safeInt(holder.getActiveMeterCount());
             int offline = Math.max(total - online, 0);
             int failedCommands = 0;
