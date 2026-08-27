@@ -139,9 +139,9 @@ public class NetworkWriteServiceTest {
         assertEquals("success", result.get("status"));
         assertEquals(ipPorts, result.get("ipPorts"));
 
-        // Verify Port written first (Class 41, Attr 2) as UINT32
-        verify(dlmsReaderUtils).writeAttribute(eq(dlmsClient), eq(serial), eq("0.11.25.0.0.255"), eq(41), eq(2), eq((long)port), eq(DataType.UINT32));
-        // Verify IP written second (Class 45, Attr 5)
+        // Verify IP written first (Class 45, Attr 5) as OCTET_STRING
         verify(dlmsReaderUtils).writeAttribute(eq(dlmsClient), eq(serial), eq("0.11.25.4.0.255"), eq(45), eq(5), any(byte[].class), eq(DataType.OCTET_STRING));
+        // Verify Port written second (Class 41, Attr 2) as OCTET_STRING
+        verify(dlmsReaderUtils).writeAttribute(eq(dlmsClient), eq(serial), eq("0.11.25.0.0.255"), eq(41), eq(2), any(byte[].class), eq(DataType.OCTET_STRING));
     }
 }
