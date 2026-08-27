@@ -43,6 +43,9 @@ public interface MeterRepository extends JpaRepository<Meter, UUID> {
        """)
     List<MeterDTO> findMeterDetailsByMeterNumberIn(@Param("meterNumbers") List<String> meterNumbers);
 
+    @org.springframework.data.jpa.repository.EntityGraph(attributePaths = {"meterIntegration"})
+    Optional<Meter> findByMeterNumber(String meterNumber);
+
     /*✅ Purpose:
 	•	Retrieves all meter numbers with their corresponding models.
 	•	Joins meters with meter_integrations.*/

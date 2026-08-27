@@ -1,6 +1,9 @@
 package com.memmcol.hes.nettyUtils;
 
 import com.memmcol.hes.application.port.out.TxRxService;
+import com.memmcol.hes.model.Meter;
+import com.memmcol.hes.model.MeterIntegration;
+import com.memmcol.hes.repository.MeterRepository;
 import com.memmcol.hes.service.MeterConnections;
 import com.memmcol.hes.service.MeterSession;
 import gurux.dlms.GXByteBuffer;
@@ -37,13 +40,11 @@ public class SessionManagerMultiVendor {
     private final Map<String, MeterSession> sessionMap = new ConcurrentHashMap<>();
     private final Duration SESSION_TIMEOUT = Duration.ofMinutes(3);
     private final TxRxService txRxService;
+    private final MeterRepository meterRepository;
 
-    // --- Optional: external configuration mapping ---
-    private final Map<String, DlmsConfig> meterConfigMap = new HashMap<>();
-
-    public SessionManagerMultiVendor(TxRxService txRxService) {
+    public SessionManagerMultiVendor(TxRxService txRxService, MeterRepository meterRepository) {
         this.txRxService = txRxService;
-        loadDefaultConfigs();
+        this.meterRepository = meterRepository;
     }
 
     @PostConstruct
@@ -52,79 +53,114 @@ public class SessionManagerMultiVendor {
     }
 
     /**
-     * Determine meter model from serial or DB.
-     * This is a simple version – later you can query asset_meter or metadata service.
+     * Creates a DLMS client by querying MeterIntegration from DB.
      */
-    private String resolveModelId(String serial) {
-        if (serial.startsWith("202006")) return "MOMAS";
-        if (serial.startsWith("62122")) return "MOMAS";
-        if (serial.startsWith("62222")) return "MOMAS";
-        if (serial.startsWith("62124")) return "LONGDIAN";
-        if (serial.startsWith("62224")) return "LONGDIAN";
-        if (serial.startsWith("62525")) return "LONGDIAN";
-        if (serial.startsWith("62526")) return "LONGDIAN";
-        return "MOMAS";
-    }
+    private GXDLMSClient createDlmsClient(String serial) {
+        MeterIntegration integration = meterRepository.findByMeterNumber(serial)
+                .map(Meter::getMeterIntegration)
+                .orElse(null);
 
-    /**
-     * Define default or vendor-specific DLMS configurations.
-     * You can load these later from DB, YAML, or REST config service.
-     */
-    private void loadDefaultConfigs() {
-        meterConfigMap.put("GENERIC", new DlmsConfig(1, 1,
-                Authentication.LOW, "11111111", InterfaceType.WRAPPER));
+        int clientId = parseClientId(integration != null ? integration.getClientId() : null);
+        int serverId = 1;
+        Authentication auth = parseAuthentication(integration != null ? integration.getAuthenticationType() : null);
+        String password = integration != null && integration.getPassword() != null ? integration.getPassword() : "12345678";
+        InterfaceType interfaceType = parseInterfaceType(integration != null ? integration.getProtocol() : null);
 
-        meterConfigMap.put("MOMAS", new DlmsConfig(1, 1,
-                Authentication.LOW, "12345678", InterfaceType.WRAPPER));
+        if (auth == Authentication.HIGH_GMAC || auth == Authentication.HIGH) {
+            GXDLMSSecureClient secureClient = new GXDLMSSecureClient(
+                    true,
+                    clientId,
+                    serverId,
+                    auth,
+                    password,
+                    interfaceType
+            );
 
-        meterConfigMap.put("LONGDIAN", new DlmsConfig(1, 1,
-                Authentication.LOW, "00000000", InterfaceType.WRAPPER));
-    }
-
-    /**
-     * Creates a DLMS client dynamically based on model or prefix.
-     */
-    private GXDLMSClient createDlmsClient(String serial, String modelId) {
-        DlmsConfig cfg = meterConfigMap.getOrDefault(modelId, meterConfigMap.get("MOMAS"));
+            configureCiphering(secureClient, integration);
+            return secureClient;
+        }
 
         return new GXDLMSClient(
                 true,
-                cfg.getClientId(),
-                cfg.getServerId(),
-                cfg.getAuth(),
-                cfg.getPassword(),
-                cfg.getInterfaceType()
+                clientId,
+                serverId,
+                auth,
+                password,
+                interfaceType
         );
     }
 
-    private GXDLMSClient createSecureDlmsClient(String serial, String modelId) {
-        DlmsConfig cfg = meterConfigMap.getOrDefault(modelId, meterConfigMap.get("CLOU"));
+    private void configureCiphering(GXDLMSSecureClient client, MeterIntegration integration) {
+        GXCiphering ciphering = client.getCiphering();
+        ciphering.setSecurity(Security.AUTHENTICATION);
 
-        GXDLMSSecureClient client = new GXDLMSSecureClient(
-                true,
-                cfg.getClientId(),
-                cfg.getServerId(),
-                cfg.getAuth(),
-                cfg.getPassword(),
-                cfg.getInterfaceType()
-        );
-
-        // Only configure ciphering for secure models
-        if (cfg.getAuth() == Authentication.HIGH_GMAC || cfg.getAuth() == Authentication.HIGH) {
-            client.getCiphering().setSecurity(Security.AUTHENTICATION);  //ENCRYPTION, AUTHENTICATION_ENCRYPTION, NONE, AUTHENTICATION
-            client.getCiphering().setSystemTitle(GXCommon.hexToBytes("4C44430000000001")); // System title
-            client.getCiphering().setBlockCipherKey(GXCommon.hexToBytes("00000000000000000000000000000000"));
-            client.getCiphering().setAuthenticationKey(GXCommon.hexToBytes("30303030303030303030303030303030"));
-            client.getCiphering().setSecuritySuite(SecuritySuite.SUITE_0);
-            client.getCiphering().setBroadcastBlockCipherKey(GXCommon.hexToBytes("30303030303030303030303030303030"));
-            client.getCiphering().setDedicatedKey(GXCommon.hexToBytes("30303030303030303030303030303030"));
-            client.getCiphering().setInvocationCounter(1);
+        if (integration != null) {
+            if (integration.getSerial() != null && !integration.getSerial().isBlank()) {
+                ciphering.setSystemTitle(GXCommon.hexToBytes(integration.getSerial()));
+            }
+            if (integration.getEncryptionKey() != null && !integration.getEncryptionKey().isBlank()) {
+                ciphering.setBlockCipherKey(GXCommon.hexToBytes(integration.getEncryptionKey()));
+            }
+            if (integration.getAuthMechanism() != null && !integration.getAuthMechanism().isBlank()) {
+                ciphering.setAuthenticationKey(GXCommon.hexToBytes(integration.getAuthMechanism()));
+            }
+            if (integration.getGlobalBroadcastEncryptionKey() != null && !integration.getGlobalBroadcastEncryptionKey().isBlank()) {
+                ciphering.setBroadcastBlockCipherKey(GXCommon.hexToBytes(integration.getGlobalBroadcastEncryptionKey()));
+            }
+            if (integration.getMasterKey() != null && !integration.getMasterKey().isBlank()) {
+                ciphering.setDedicatedKey(GXCommon.hexToBytes(integration.getMasterKey()));
+            }
         }
-
-        return client;
+        ciphering.setSecuritySuite(SecuritySuite.SUITE_0);
+        ciphering.setInvocationCounter(1);
     }
 
-       /**
+    private int parseClientId(String raw) {
+        if (raw != null) {
+            try {
+                return Integer.parseInt(raw.trim());
+            } catch (NumberFormatException e) {
+                log.warn("Invalid client_id in DB: {}", raw);
+            }
+        }
+        return 1;
+    }
+
+    private Authentication parseAuthentication(String raw) {
+        if (raw != null) {
+            try {
+                return Authentication.valueOf(raw.toUpperCase().trim());
+            } catch (IllegalArgumentException e) {
+                if ("LOW_SECURITY".equalsIgnoreCase(raw.trim())) {
+                    return Authentication.LOW;
+                } else if ("HIGH_SECURITY".equalsIgnoreCase(raw.trim())) {
+                    return Authentication.HIGH;
+                } else if ("HIGH_GMAC".equalsIgnoreCase(raw.trim())) {
+                    return Authentication.HIGH_GMAC;
+                } else if ("NONE".equalsIgnoreCase(raw.trim())) {
+                    return Authentication.NONE;
+                }
+                log.warn("Unrecognized authentication_type in DB: {}", raw);
+            }
+        }
+        return Authentication.LOW;
+    }
+
+    private InterfaceType parseInterfaceType(String raw) {
+        if (raw != null) {
+            try {
+                return InterfaceType.valueOf(raw.toUpperCase().trim());
+            } catch (IllegalArgumentException e) {
+                if ("TCP".equalsIgnoreCase(raw.trim()) || "IP".equalsIgnoreCase(raw.trim())) {
+                    return InterfaceType.WRAPPER;
+                }
+                log.warn("Unrecognized protocol/interface_type in DB: {}", raw);
+            }
+        }
+        return InterfaceType.WRAPPER;
+    }
+
+    /**
      * Adds or reuses a session for a given meter.
      */
     public synchronized void addSession(String serial, Channel channel) throws Exception {
@@ -138,23 +174,24 @@ public class SessionManagerMultiVendor {
             return;
         }
 
-        GXDLMSClient dlmsClient = new GXDLMSClient();
-
-        // --- Identify meter model dynamically (from DB or prefix) ---
-        String modelId = resolveModelId(serial);
-        dlmsClient = createDlmsClient(serial, modelId);
+        GXDLMSClient dlmsClient = createDlmsClient(serial);
+        String modelId = meterRepository.findByMeterNumber(serial)
+                .map(m -> m.getMeterIntegration().getModel())
+                .orElse("UNKNOWN");
 
         try {
             log.info("🔗 Setting up DLMS Association for {} (Model: {})", serial, modelId);
             byte[][] aarq = dlmsClient.aarqRequest();
             byte[] response = txRxService.sendReceiveWithContext(serial, aarq[0], 20000);
 
-            byte[] payload = Arrays.copyOfRange(response, 8, response.length);
-            GXByteBuffer replyBuffer = new GXByteBuffer(payload);
-            try {
-                dlmsClient.parseAareResponse(replyBuffer);
-            } catch (IllegalArgumentException e) {
-                log.warn("⚠️ AARE parse failed for {}: {}", serial, e.getMessage());
+            if (response != null && response.length >= 8) {
+                byte[] payload = Arrays.copyOfRange(response, 8, response.length);
+                GXByteBuffer replyBuffer = new GXByteBuffer(payload);
+                try {
+                    dlmsClient.parseAareResponse(replyBuffer);
+                } catch (IllegalArgumentException e) {
+                    log.warn("⚠️ AARE parse failed for {}: {}", serial, e.getMessage());
+                }
             }
 
             log.info("✅ DLMS Association established for {} (Model: {})", serial, modelId);
