@@ -4,8 +4,10 @@ import com.memmcol.hes.application.port.out.MeterLockPort;
 import com.memmcol.hes.dto.MeterDTO;
 import com.memmcol.hes.infrastructure.dlms.DlmsReaderUtils;
 import com.memmcol.hes.model.DlmsResponse;
+import com.memmcol.hes.model.ObisCodeEntity;
 import com.memmcol.hes.nettyUtils.SessionManagerMultiVendor;
 import com.memmcol.hes.repository.MeterRepository;
+import com.memmcol.hes.repository.ObisCodeRepository;
 import gurux.dlms.GXDLMSClient;
 import gurux.dlms.enums.DataType;
 import gurux.dlms.internal.GXCommon;
@@ -33,6 +35,9 @@ public class NetworkWriteService {
     private final DlmsReaderUtils dlmsReaderUtils;
     private final MeterLockPort meterLockPort;
     private final MeterRepository meterRepository;
+    private final ObisCodeRepository obisCodeRepository;
+    private static  final String APN_ACTION = "APN Operation";
+    private static  final String IP_PORT_ACTION = "IP/Port Operation";
 
     /**
      * Write APN value into the meter.
@@ -42,19 +47,44 @@ public class NetworkWriteService {
     public Map<String, Object> writeApn(String meterSerial, String apn) throws Exception {
         return meterLockPort.withExclusive(meterSerial, () -> {
             GXDLMSClient client = sessionManager.getOrCreateClient(meterSerial);
+
             if (client == null) {
                 throw new IllegalStateException("No DLMS session found for meter: " + meterSerial);
             }
 
             MeterDTO meter = meterRepository.findMeterDetailsByMeterNumber(meterSerial)
                     .orElseThrow(() -> new IllegalArgumentException("Meter not found: " + meterSerial));
-            boolean isMd = "MD".equalsIgnoreCase(meter.getMeterClass());
-            String obis = isMd ? "0.0.25.4.0.255" : "0.11.25.4.0.255";
 
-            log.info("Writing APN '{}' to meter {} (Class: {}, OBIS: {})", apn, meterSerial, meter.getMeterClass(), obis);
+            String model = meter.getMeterModel();
+
+//            boolean isMd = "MD".equalsIgnoreCase(meter.getMeterClass());
+//            String obis = isMd ? "0.0.25.4.0.255" : "0.11.25.4.0.255";
+
+            List<ObisCodeEntity> obisEntity = obisCodeRepository.findActiveByModelAndAction(model, APN_ACTION);
+            if (obisEntity.isEmpty()) {
+                throw new IllegalStateException(
+                        "No OBIS mapping found for model=" + model + " action=" + APN_ACTION
+                );
+            }
+
+            ObisCodeEntity obis = obisEntity.get(0);
+
+            String[] parts = obis.getCode().split(";");
+            if (parts.length < 3) {
+                throw new IllegalStateException(
+                        "OBIS code '" + obis.getCode() + "' does not match expected format " +
+                                "(classId;obisCode;attributeIndex;dataIndex)");
+            }
+
+            int classId = Integer.parseInt(parts[0]);
+            String obisCode = parts[1];
+            int attributeId = Integer.parseInt(parts[2]);
+
+
+            log.info("Writing APN '{}' to meter {} (Class: {}, OBIS: {})", apn, meterSerial, meter.getMeterClass(), obisCode);
 
             // Class 45 (GPRS Setup), Attribute 2 (APN) is Octet String (DataType.OCTET_STRING)
-            DlmsResponse response = dlmsReaderUtils.writeAttribute(client, meterSerial, obis, 45, 2,
+            DlmsResponse response = dlmsReaderUtils.writeAttribute(client, meterSerial, obisCode, classId, attributeId,
                     apn.getBytes(StandardCharsets.UTF_8), DataType.OCTET_STRING);
 
             Map<String, Object> result = new LinkedHashMap<>();
@@ -150,7 +180,16 @@ public class NetworkWriteService {
 
             MeterDTO meter = meterRepository.findMeterDetailsByMeterNumber(meterSerial)
                     .orElseThrow(() -> new IllegalArgumentException("Meter not found: " + meterSerial));
-            boolean isMd = "MD".equalsIgnoreCase(meter.getMeterClass());
+
+            String model = meter.getMeterModel();
+//            boolean isMd = "MD".equalsIgnoreCase(meter.getMeterClass());
+
+            List<ObisCodeEntity> obisEntity = obisCodeRepository.findActiveByModelAndAction(model, IP_PORT_ACTION);
+            if (obisEntity.isEmpty()) {
+                throw new IllegalStateException(
+                        "No OBIS mapping found for model=" + model + " action=" + IP_PORT_ACTION
+                );
+            }
 
             DlmsResponse response = null;
             Map<String, Object> result = new LinkedHashMap<>();
@@ -158,37 +197,101 @@ public class NetworkWriteService {
             result.put("ipPorts", ipPorts);
 
             try {
-                if (isMd) {
+                if (obisEntity.size() == 1) {
+
+                    ObisCodeEntity obis = obisEntity.get(0);
+                    String[] parts = obis.getCode().split(";");
+                    int classId = Integer.parseInt(parts[0]);
+                    String code = parts[1];
+                    int attributeId = Integer.parseInt(parts[2]);
+
                     log.info("Writing Destination List {} to MD meter {}", ipPorts, meterSerial);
+
                     List<byte[]> octetStrings = ipPorts.stream()
                             .map(s -> s.getBytes(StandardCharsets.UTF_8))
                             .toList();
 
-                    response = dlmsReaderUtils.writeAttribute(client, meterSerial, "0.0.2.1.0.255", 29, 6,
+                    response = dlmsReaderUtils.writeAttribute(client, meterSerial, code, classId, attributeId,
                             octetStrings, DataType.ARRAY);
                 } else {
-                    String ipPortStr = ipPorts.get(0);
-                    String[] parts = ipPortStr.split(":");
-                    if (parts.length != 2) {
-                        throw new IllegalArgumentException("Invalid IP:Port format for Non-MD meter: " + ipPortStr);
+                    if (ipPorts == null || ipPorts.isEmpty()) {
+                        throw new IllegalArgumentException("At least one IP:Port value is required");
                     }
-                    String ip = parts[0];
-                    String portStr = parts[1]; // FIX: Keep as String to support documentation OCTS type
 
-                    log.info("Executing Protected Sequence -> Writing IP: {} then Port: {} as OCTET_STRING to Non-MD meter {}", ip, portStr, meterSerial);
+                    String ipPort = ipPorts.get(0);
 
-                    // STEP 1: Write IP first (Class 45, Attr 5) - Keeps connection stable
-                    response = dlmsReaderUtils.writeAttribute(client, meterSerial, "0.11.25.4.0.255", 45, 5,
-                            ip.getBytes(StandardCharsets.UTF_8), DataType.OCTET_STRING);
+                    String[] ipPortParts = ipPort.split(":", 2);
 
-                    // STEP 2: Only write Port if IP was successful
-                    if (response != null && (response.isSuccess() || "SUCCESS".equalsIgnoreCase(response.getStatus().toString()))) {
+                    if (ipPortParts.length != 2) {
+                        throw new IllegalArgumentException("Invalid IP:Port format: " + ipPort);
+                    }
 
-                        // FIX: Convert port string characters to raw ASCII bytes to match DataType.OCTET_STRING
-                        byte[] portBytes = portStr.getBytes(StandardCharsets.UTF_8);
+                    String ip = ipPortParts[0];
+                    String port = ipPortParts[1];
 
-                        response = dlmsReaderUtils.writeAttribute(client, meterSerial, "0.11.25.0.0.255", 41, 2,
-                                portBytes, DataType.OCTET_STRING);
+                    /*
+                     * First mapping = IP
+                     */
+                    ObisCodeEntity ipObis = obisEntity.get(0);
+
+                    String[] ipParts = parseObisMapping(ipObis);
+
+                    int ipClassId = Integer.parseInt(ipParts[0]);
+                    String ipCode = ipParts[1];
+                    int ipAttributeId = Integer.parseInt(ipParts[2]);
+
+                    log.info(
+                            "Writing IP {} to meter {} " + "(Class: {}, OBIS: {}, Attribute: {})",
+                            ip,
+                            meterSerial,
+                            ipClassId,
+                            ipCode,
+                            ipAttributeId
+                    );
+
+                    response = dlmsReaderUtils.writeAttribute(
+                            client,
+                            meterSerial,
+                            ipCode,
+                            ipClassId,
+                            ipAttributeId,
+                            ip.getBytes(StandardCharsets.UTF_8),
+                            DataType.OCTET_STRING
+                    );
+
+                    /*
+                     * Only write Port when IP write succeeds.
+                     */
+                    if (isSuccessful(response)) {
+                        /*
+                         * Second mapping = Port
+                         */
+                        ObisCodeEntity portObis = obisEntity.get(1);
+
+                        String[] portParts = parseObisMapping(portObis);
+
+                        int portClassId = Integer.parseInt(portParts[0]);
+                        String portCode = portParts[1];
+                        int portAttributeId = Integer.parseInt(portParts[2]);
+
+                        log.info(
+                                "Writing Port {} to meter {} " + "(Class: {}, OBIS: {}, Attribute: {})",
+                                port,
+                                meterSerial,
+                                portClassId,
+                                portCode,
+                                portAttributeId
+                        );
+
+                        response = dlmsReaderUtils.writeAttribute(
+                                client,
+                                meterSerial,
+                                portCode,
+                                portClassId,
+                                portAttributeId,
+                                port.getBytes(StandardCharsets.UTF_8),
+                                DataType.OCTET_STRING
+                        );
                     }
                 }
 
@@ -215,5 +318,22 @@ public class NetworkWriteService {
 
             return result;
         });
+    }
+
+    private String[] parseObisMapping(ObisCodeEntity obis) {
+        String code = obis.getCode();
+        String[] parts = code.split(";");
+
+        if (parts.length < 3) {
+            throw new IllegalStateException( "Invalid OBIS mapping: " + code + ". Expected format: " + "(classId;obisCode;attributeIndex)");
+        }
+        return parts;
+    }
+
+    private boolean isSuccessful(DlmsResponse response) {
+        return response != null
+                && (
+                response.isSuccess() || "SUCCESS".equalsIgnoreCase(String.valueOf(response.getStatus()))
+        );
     }
 }

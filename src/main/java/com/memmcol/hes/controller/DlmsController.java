@@ -206,7 +206,7 @@ public class DlmsController {
     public ResponseEntity<Map<String, Object>> setControlMode(
             @RequestParam String serial,
             @RequestParam int mode
-    ) {
+            ) {
         Map<String, Object> response = new HashMap<>();
 
         try {

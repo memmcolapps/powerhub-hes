@@ -16,18 +16,20 @@ public interface MeterRepository extends JpaRepository<Meter, UUID> {
 
     // Fetch only meters whose serial numbers are in the given set
     @Query("""
-       SELECT new com.memmcol.hes.dto.MeterDTO(
-           m.meterNumber,
-           mi.model,
-           mi.meterClass,
-           false,
-           m.createdAt
-           )
-       FROM Meter m
-       JOIN m.meterIntegration mi
-       WHERE m.meterNumber = :meterNumber
-       """)
-    Optional<MeterDTO> findMeterDetailsByMeterNumber(@Param("meterNumber") String meterNumber);
+    SELECT new com.memmcol.hes.dto.MeterDTO(
+        m.meterNumber,
+        mi.model,
+        mi.meterClass,
+        false,
+        m.createdAt
+    )
+    FROM Meter m
+    JOIN m.meterIntegration mi
+    WHERE m.meterNumber = :meterNumber
+    """)
+    Optional<MeterDTO> findMeterDetailsByMeterNumber(
+            @Param("meterNumber") String meterNumber
+    );
 
     @Query("""
        SELECT new com.memmcol.hes.dto.MeterDTO(
