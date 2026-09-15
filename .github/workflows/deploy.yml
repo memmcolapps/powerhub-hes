@@ -87,6 +87,12 @@ jobs:
           EUREKA_ADDRESS=${{ secrets.EUREKA_ADDRESS }}
           EUREKA_PORT=${{ secrets.EUREKA_PORT }}
           LOCATION=${{ secrets.LOCATION }}
+          TOKEN_ISSUER="${{ secrets.T_ISSUER }}"
+          TOKEN_ACCESS="${{ secrets.T_ACCESS }}"
+          TOKEN_REFRESH="${{ secrets.T_REFRESH }}"
+          TOKEN_SECRET="${{ secrets.T_SECRET }}"
+          SPRING_SECURITY_USER="${{ secrets.SPRING_SECURITY_USER }}"
+          SPRING_SECURITY_PASSWORD="${{ secrets.SPRING_SECURITY_PASSWORD }}"
           EOF
           
           ssh -o StrictHostKeyChecking=no $SERVER "chmod 600 /${{ secrets.LOCATION }}/.env.powerhub-hes"
@@ -135,6 +141,12 @@ jobs:
           EUREKA_ADDRESS="${{ secrets.EUREKA_ADDRESS }}"
           EUREKA_PORT="${{ secrets.EUREKA_PORT }}"
           LOCATION="${{ secrets.LOCATION }}"
+          TOKEN_ISSUER="${{ secrets.T_ISSUER }}"
+          TOKEN_ACCESS="${{ secrets.T_ACCESS }}"
+          TOKEN_REFRESH="${{ secrets.T_REFRESH }}"
+          TOKEN_SECRET="${{ secrets.T_SECRET }}"
+          SPRING_SECURITY_USER="${{ secrets.SPRING_SECURITY_USER }}"
+          SPRING_SECURITY_PASSWORD="${{ secrets.SPRING_SECURITY_PASSWORD }}"
           EOF
           
           ssh -o StrictHostKeyChecking=no $SERVER "chmod 600 /${{ secrets.LOCATION }}/.env.powerhub-hes"
