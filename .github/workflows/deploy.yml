@@ -1,0 +1,188 @@
+name: Deploy Spring Boot to Server
+
+on:
+  push:
+    branches:
+      - powerhub-hes-staging
+      - main
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      # =====================
+      # Checkout
+      # =====================
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      # =====================
+      # Java Setup
+      # =====================
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: maven
+
+      # =====================
+      # Build
+      # =====================
+      - name: Build with Maven
+        run: mvn -B clean package -DskipTests
+
+      # =====================
+      # Optional Flyway Repair (STAGING)
+      # =====================
+      - name: Flyway Repair
+        if: github.ref == 'refs/heads/powerhub-hes-staging'
+        working-directory: api
+        run: |
+          if [ "${{ secrets.RUN_FLYWAY_REPAIR }}" = "true" ]; then
+            echo "Running Flyway repair..."
+
+            mvn flyway:repair \
+              -Dflyway.url=jdbc:postgresql://${{ secrets.STAGING_DB_HOST }}:${{ secrets.STAGING_DB_PORT }}/${{ secrets.STAGING_DB_NAME }} \
+              -Dflyway.user=${{ secrets.STAGING_DB_USERNAME }} \
+              -Dflyway.password=${{ secrets.STAGING_DB_PASSWORD }}
+          else
+            echo "Skipping Flyway repair."
+          fi
+
+      # =====================
+      # Resolve JAR
+      # =====================
+      - name: Resolve JAR
+        run: |
+          JAR_FILE=$(find api/target -name "*.jar" ! -name "*original*.jar" | head -n 1)
+
+          if [ -z "$JAR_FILE" ]; then
+            echo "No JAR found"
+            exit 1
+          fi
+
+          echo "JAR_FILE=$JAR_FILE" >> $GITHUB_ENV
+          echo "Found: $JAR_FILE"
+
+      # =====================================================
+      # SSH SETUP (STAGING)
+      # =====================================================
+      - name: Setup SSH (Staging)
+        if: github.ref == 'refs/heads/powerhub-hes-staging'
+        uses: webfactory/ssh-agent@v0.8.0
+        with:
+          ssh-private-key: ${{ secrets.STAGING_SSH_PRIVATE_KEY }}
+
+      # =====================================================
+      # DEPLOY STAGING
+      # =====================================================
+      - name: Deploy Staging
+        if: github.ref == 'refs/heads/powerhub-hes-staging'
+        run: |
+          SERVER="${{ secrets.STAGING_SERVER_USER }}@${{ secrets.STAGING_SERVER_HOST }}"
+          REMOTE_PATH="/${{ secrets.LOCATION }}/powerhub-hes.jar"
+
+          echo "Creating remote directory..."
+          ssh -o StrictHostKeyChecking=no $SERVER "mkdir -p /${{ secrets.LOCATION }}"
+
+          echo "Stopping service before upload..."
+          ssh -o StrictHostKeyChecking=no $SERVER "sudo systemctl stop powerhub-hes"
+
+          echo "Uploading JAR..."
+          rsync -az --delete -e "ssh -o StrictHostKeyChecking=no" \
+            "$JAR_FILE" \
+            $SERVER:$REMOTE_PATH
+          
+          echo "Writing env file..."
+          ssh -o StrictHostKeyChecking=no $SERVER "cat > /${{ secrets.LOCATION }}/.env.powerhub-hes" << EOF
+          DB_HOST=${{ secrets.STAGING_DB_HOST }}
+          DB_PORT=${{ secrets.STAGING_DB_PORT }}
+          POSTGRES_DB=${{ secrets.STAGING_DB_NAME }}
+          POSTGRES_USER=${{ secrets.STAGING_DB_USERNAME }}
+          POSTGRES_PASSWORD=${{ secrets.STAGING_DB_PASSWORD }}
+          EUREKA_ADDRESS=${{ secrets.EUREKA_ADDRESS }}
+          EUREKA_PORT=${{ secrets.EUREKA_PORT }}
+          LOCATION=${{ secrets.LOCATION }}
+          EOF
+          
+          ssh -o StrictHostKeyChecking=no $SERVER "chmod 600 /${{ secrets.LOCATION }}/.env.powerhub-hes"
+
+          echo "Starting service..."
+          ssh -o StrictHostKeyChecking=no $SERVER "sudo systemctl start powerhub-hes"
+
+          echo "Verifying service is running..."
+          ssh -o StrictHostKeyChecking=no $SERVER "for i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15; do STATUS=\$(sudo systemctl is-active powerhub-hes 2>/dev/null || true); if [ \"\$STATUS\" = \"active\" ]; then echo \"Service is active\"; exit 0; fi; echo \"Waiting... (\$STATUS)\"; sleep 5; done; echo 'Service failed to start'; sudo systemctl status powerhub-hes --no-pager; exit 1"
+
+          echo "Deployment complete"
+
+      # =====================================================
+      # SSH SETUP (PRODUCTION)
+      # =====================================================
+      - name: Setup SSH (Production)
+        if: github.ref == 'refs/heads/main'
+        uses: webfactory/ssh-agent@v0.8.0
+        with:
+          ssh-private-key: ${{ secrets.PROD_SSH_PRIVATE_KEY }}
+
+      # =====================================================
+      # DEPLOY PRODUCTION
+      # =====================================================
+      - name: Deploy Production
+        if: github.ref == 'refs/heads/main'
+        run: |
+          SERVER="${{ secrets.PROD_SERVER_USER }}@${{ secrets.PROD_SERVER_HOST }}"
+          REMOTE_PATH="/${{ secrets.LOCATION }}/powerhub-hes.jar"
+
+          echo "Creating remote directory..."
+          ssh -o StrictHostKeyChecking=no $SERVER "mkdir -p /${{ secrets.LOCATION }}"
+
+          echo "Uploading JAR..."
+          rsync -az --delete -e "ssh -o StrictHostKeyChecking=no" \
+            "$JAR_FILE" \
+            $SERVER:$REMOTE_PATH
+          
+          echo "Writing env file..."
+          ssh -o StrictHostKeyChecking=no $SERVER "cat > /${{ secrets.LOCATION }}/.env.powerhub-hes" << EOF
+          DB_HOST="${{ secrets.PROD_DB_HOST }}"
+          DB_PORT="${{ secrets.PROD_DB_PORT }}"
+          POSTGRES_DB="${{ secrets.STAGING_DB_NAME }}"
+          POSTGRES_USER="${{ secrets.STAGING_DB_USERNAME }}"
+          POSTGRES_PASSWORD="${{ secrets.STAGING_DB_PASSWORD }}"
+          EUREKA_ADDRESS="${{ secrets.EUREKA_ADDRESS }}"
+          EUREKA_PORT="${{ secrets.EUREKA_PORT }}"
+          LOCATION="${{ secrets.LOCATION }}"
+          EOF
+          
+          ssh -o StrictHostKeyChecking=no $SERVER "chmod 600 /${{ secrets.LOCATION }}/.env.powerhub-hes"
+
+
+          echo "Deploying (safe SSH execution)..."
+          ssh -o StrictHostKeyChecking=no $SERVER 'bash -s' << 'EOF'
+
+            set -e
+
+            echo "Stopping app safely..."
+
+            PID=$(ps -ef | grep powerhub-hes.jar | grep -v grep | awk '{print $2}')
+
+            if [ -n "$PID" ]; then
+              echo "Killing PID: $PID"
+              kill -9 $PID || true
+            else
+              echo "No running process found"
+            fi
+
+            echo "Starting app..."
+          
+            set -a
+            source /${{ secrets.LOCATION }}/.env.powerhub-hes
+            set +a
+
+            nohup java -Dspring.profiles.active=prod \
+              -jar /${{ secrets.LOCATION }}/powerhub-hes.jar \
+              >/dev/null 2>&1 < /dev/null &
+
+            echo "Deployment complete"
+          EOF
