@@ -32,25 +32,7 @@ jobs:
       # =====================
       - name: Build with Maven
         run: mvn -B clean package -DskipTests
-
-      # =====================
-      # Optional Flyway Repair (STAGING)
-      # =====================
-      - name: Flyway Repair
-        if: github.ref == 'refs/heads/powerhub-hes-staging'
-        working-directory: api
-        run: |
-          if [ "${{ secrets.RUN_FLYWAY_REPAIR }}" = "true" ]; then
-            echo "Running Flyway repair..."
-
-            mvn flyway:repair \
-              -Dflyway.url=jdbc:postgresql://${{ secrets.STAGING_DB_HOST }}:${{ secrets.STAGING_DB_PORT }}/${{ secrets.STAGING_DB_NAME }} \
-              -Dflyway.user=${{ secrets.STAGING_DB_USERNAME }} \
-              -Dflyway.password=${{ secrets.STAGING_DB_PASSWORD }}
-          else
-            echo "Skipping Flyway repair."
-          fi
-
+        
       # =====================
       # Resolve JAR
       # =====================
