@@ -38,7 +38,7 @@ jobs:
       # =====================
       - name: Resolve JAR
         run: |
-          JAR_FILE=$(find api/target -name "*.jar" ! -name "*original*.jar" | head -n 1)
+          JAR_FILE=$(find target -name "*.jar" ! -name "*original*.jar" | head -n 1)
 
           if [ -z "$JAR_FILE" ]; then
             echo "No JAR found"
