@@ -147,7 +147,7 @@ jobs:
 
             echo "Stopping app safely..."
 
-            PID=$(ps -ef | grep powerhub-hes.jar | grep -v grep | awk '{print $2}')
+            PID=$(ps -ef | grep powerhub-hes-service.jar | grep -v grep | awk '{print $2}')
 
             if [ -n "$PID" ]; then
               echo "Killing PID: $PID"
