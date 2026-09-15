@@ -64,7 +64,7 @@ jobs:
         if: github.ref == 'refs/heads/powerhub-hes-staging'
         run: |
           SERVER="${{ secrets.STAGING_SERVER_USER }}@${{ secrets.STAGING_SERVER_HOST }}"
-          REMOTE_PATH="/${{ secrets.LOCATION }}/powerhub-hes.jar"
+          REMOTE_PATH="/${{ secrets.LOCATION }}/powerhub-hes-service.jar"
 
           echo "Creating remote directory..."
           ssh -o StrictHostKeyChecking=no $SERVER "mkdir -p /${{ secrets.LOCATION }}"
@@ -115,7 +115,7 @@ jobs:
         if: github.ref == 'refs/heads/main'
         run: |
           SERVER="${{ secrets.PROD_SERVER_USER }}@${{ secrets.PROD_SERVER_HOST }}"
-          REMOTE_PATH="/${{ secrets.LOCATION }}/powerhub-hes.jar"
+          REMOTE_PATH="/${{ secrets.LOCATION }}/powerhub-hes-service.jar"
 
           echo "Creating remote directory..."
           ssh -o StrictHostKeyChecking=no $SERVER "mkdir -p /${{ secrets.LOCATION }}"
@@ -163,7 +163,7 @@ jobs:
             set +a
 
             nohup java -Dspring.profiles.active=prod \
-              -jar /${{ secrets.LOCATION }}/powerhub-hes.jar \
+              -jar /${{ secrets.LOCATION }}/powerhub-hes-service.jar \
               >/dev/null 2>&1 < /dev/null &
 
             echo "Deployment complete"
