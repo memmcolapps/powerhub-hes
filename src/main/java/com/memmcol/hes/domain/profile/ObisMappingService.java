@@ -1,118 +1,179 @@
 package com.memmcol.hes.domain.profile;
 
-import com.memmcol.hes.model.ObisMapping;
-import com.memmcol.hes.repository.ObisMappingRepository;
+import com.memmcol.hes.model.ObisCodeEntity;
+import com.memmcol.hes.repository.ObisCodeRepository;
 import com.memmcol.hes.service.ObisColumnDto;
 import jakarta.annotation.PostConstruct;
-import lombok.AllArgsConstructor;
+import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.cache.CacheManager;
 import org.springframework.cache.annotation.Cacheable;
 import org.springframework.stereotype.Service;
 
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.stream.Collectors;
 
 @Service
-@AllArgsConstructor
+@RequiredArgsConstructor
 @Slf4j
 public class ObisMappingService {
 
-    private final ObisMappingRepository obisMappingRepository;
+    private final ObisCodeRepository obisCodeRepository;
     private final CacheManager cacheManager;
 
     @Cacheable(value = "modelScalerMap", key = "#model")
     public Map<String, MultiplierDTO> getScalerAndPurposeMap(String model) {
-        List<ObisMapping> mappings = obisMappingRepository.findByModel(model);
-        return mappings.stream()
-                .filter(m -> m.getScaler() != null)
-                .collect(Collectors.toMap(
-                        ObisMapping::getObisCodeCombined,
-                        m -> new MultiplierDTO(m.getScaler(), m.getPurpose(), m.getDescription()),
-                        (existing, replacement) -> existing
-                ));
+        List<ObisCodeEntity> obisCodes = obisCodeRepository.findActiveByModel(model);
+        Map<String, MultiplierDTO> map = new HashMap<>();
+        for (ObisCodeEntity o : obisCodes) {
+            Double scaler = parseScaler(o.getScaler());
+            if (scaler != null) {
+                MultiplierDTO dto = new MultiplierDTO(scaler, o.getMultiplyBy(), o.getDescription());
+                map.put(o.getCode(), dto);
+                String dotNotation = extractObisCode(o.getCode());
+                if (dotNotation != null) {
+                    map.put(dotNotation, dto);
+                    map.put(dotNotation.replace(".", ""), dto);
+                } else {
+                    map.put(o.getCode().replace(".", ""), dto);
+                }
+            }
+        }
+        return map;
     }
 
     @Cacheable(value = "modelScalerMap", key = "#model")
     public Map<String, Double> getScalersForModel(String model) {
-        List<ObisMapping> mappings = obisMappingRepository.findByModel(model);
-        return mappings.stream()
-                .filter(m -> m.getScaler() != null)
-                .collect(Collectors.toMap(
-                        ObisMapping::getObisCodeCombined,
-                        ObisMapping::getScaler,
-                        (existing, replacement) -> existing
-                ));
+        List<ObisCodeEntity> obisCodes = obisCodeRepository.findActiveByModel(model);
+        Map<String, Double> map = new HashMap<>();
+        for (ObisCodeEntity o : obisCodes) {
+            Double scaler = parseScaler(o.getScaler());
+            if (scaler != null) {
+                map.put(o.getCode(), scaler);
+                String dotNotation = extractObisCode(o.getCode());
+                if (dotNotation != null) {
+                    map.put(dotNotation, scaler);
+                    map.put(dotNotation.replace(".", ""), scaler);
+                } else {
+                    map.put(o.getCode().replace(".", ""), scaler);
+                }
+            }
+        }
+        return map;
     }
 
     @Cacheable(value = "modelDescriptionMap", key = "#model")
     public Map<String, String> getDescriptionForModel(String model) {
-        List<ObisMapping> mappings = obisMappingRepository.findByModel(model);
-        return mappings.stream()
-                .collect(Collectors.toMap(
-                        ObisMapping::getObisCodeCombined,
-                        ObisMapping::getDescription,
-                        (existing, replacement) -> existing
-                ));
+        List<ObisCodeEntity> obisCodes = obisCodeRepository.findActiveByModel(model);
+        Map<String, String> map = new HashMap<>();
+        for (ObisCodeEntity o : obisCodes) {
+            if (o.getDescription() != null) {
+                map.put(o.getCode(), o.getDescription());
+                String dotNotation = extractObisCode(o.getCode());
+                if (dotNotation != null) {
+                    map.put(dotNotation, o.getDescription());
+                    map.put(dotNotation.replace(".", ""), o.getDescription());
+                } else {
+                    map.put(o.getCode().replace(".", ""), o.getDescription());
+                }
+            }
+        }
+        return map;
     }
 
     @Cacheable(cacheNames = "obisMappings", key = "T(java.lang.String).format('%s|%s', #model, #purpose)")
-    public List<ObisMapping> getMappingsByModelAndPurpose(String model, String purpose) {
-        return obisMappingRepository.findByModelAndPurpose(model, purpose);
+    public List<ObisCodeEntity> getMappingsByModelAndPurpose(String model, String purpose) {
+        List<ObisCodeEntity> obisCodes = obisCodeRepository.findActiveByModel(model);
+        return obisCodes.stream()
+                .filter(o -> purpose != null && purpose.equalsIgnoreCase(o.getMultiplyBy()))
+                .collect(Collectors.toList());
     }
 
     @PostConstruct
     public void preloadObisMappings() {
-        List<ObisMapping> allMappings = obisMappingRepository.findAll();
+        List<ObisCodeEntity> allObisCodes = obisCodeRepository.findAll();
 
-        // Group all entries by model only
-        Map<String, List<ObisMapping>> mappingsByModel = allMappings.stream()
-                .collect(Collectors.groupingBy(ObisMapping::getModel));
+        Map<String, List<ObisCodeEntity>> mappingsByModel = allObisCodes.stream()
+                .filter(o -> "ACTIVE".equalsIgnoreCase(o.getStatus())
+                        && o.getMeterIntegration() != null
+                        && o.getMeterIntegration().getModel() != null)
+                .collect(Collectors.groupingBy(o -> o.getMeterIntegration().getModel()));
 
-        // Put each group into the cache
         mappingsByModel.forEach((model, mappings) -> {
-            cacheManager.getCache("obisMappings").put(model, mappings);
+            if (cacheManager.getCache("obisMappings") != null) {
+                cacheManager.getCache("obisMappings").put(model, mappings);
+            }
         });
 
-        log.info("✅ OBIS mappings preloaded into 'obisMappings' cache grouped by model.");
+        log.info("✅ OBIS codes preloaded into 'obisMappings' cache grouped by model.");
     }
 
     @Cacheable(cacheNames = "obisMappings", key = "#model")
-    public List<ObisMapping> getMappingsByModel(String model) {
-        return obisMappingRepository.findByModel(model);
+    public List<ObisCodeEntity> getMappingsByModel(String model) {
+        return obisCodeRepository.findActiveByModel(model);
     }
 
     public ObisColumnDto getDescriptionAndColumnName(String obisCode, String model) {
-        String obisCodeCombined = obisCode.replace(".", "");  // Or however it's stored in the DB
-        Optional<ObisMapping> optionalMapping = obisMappingRepository.findByModel(model).stream()
-                .filter(mapping -> mapping.getObisCode().equals(obisCode))  // Or compare using obisCodeCombined
+        List<ObisCodeEntity> obisCodes = obisCodeRepository.findActiveByModel(model);
+        Optional<ObisCodeEntity> optionalMapping = obisCodes.stream()
+                .filter(o -> {
+                    String code = o.getCode();
+                    String dotNotation = extractObisCode(code);
+                    if (dotNotation == null) dotNotation = code;
+                    return code.equalsIgnoreCase(obisCode)
+                            || dotNotation.equalsIgnoreCase(obisCode)
+                            || dotNotation.replace(".", "").equalsIgnoreCase(obisCode.replace(".", ""));
+                })
                 .findFirst();
 
         if (optionalMapping.isEmpty()) {
-            log.warn("OBIS mapping not found for obisCode {}: model : {}", obisCode,  model);
+            log.warn("OBIS mapping not found for obisCode {}: model : {}", obisCode, model);
             return new ObisColumnDto("", "");
         }
 
-        ObisMapping mapping = optionalMapping.get();
+        ObisCodeEntity mapping = optionalMapping.get();
         String description = mapping.getDescription();
 
-        // Generate column name
         String columnName = generateColumnNameFromDescription(description);
 
         return new ObisColumnDto(description, columnName);
+    }
+
+    private Double parseScaler(String scalerStr) {
+        if (scalerStr == null || scalerStr.isBlank()) {
+            return null;
+        }
+        try {
+            return Double.parseDouble(scalerStr.trim());
+        } catch (NumberFormatException e) {
+            log.warn("Failed to parse scaler value '{}': {}", scalerStr, e.getMessage());
+            return null;
+        }
+    }
+
+    private String extractObisCode(String code) {
+        if (code == null) return null;
+        if (code.contains(";")) {
+            String[] parts = code.split(";");
+            if (parts.length >= 2) {
+                return parts[1].trim();
+            }
+        }
+        return null;
     }
 
     private String generateColumnNameFromDescription(String description) {
         if (description == null) return null;
 
         return description
-                .replace("register", "")                // remove the word "register"
-                .replace("Register", "")                // (optional: capital R)
-                .replaceAll("\\(.*?\\)", "")            // remove units like "(V)"
-                .replaceAll("\\s+", "_")                // replace spaces with underscore
-                .replaceAll("[^a-zA-Z0-9_]", "")        // remove any non-word character
+                .replace("register", "")
+                .replace("Register", "")
+                .replaceAll("\\(.*?\\)", "")
+                .replaceAll("\\s+", "_")
+                .replaceAll("[^a-zA-Z0-9_]", "")
                 .trim()
                 .toLowerCase();
     }

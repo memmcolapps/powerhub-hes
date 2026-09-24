@@ -1,13 +1,11 @@
 package com.memmcol.hes.service;
 
 import com.memmcol.hes.infrastructure.dlms.DlmsReaderUtils;
-import com.memmcol.hes.model.ObisMapping;
+import com.memmcol.hes.model.ObisCodeEntity;
 import com.memmcol.hes.nettyUtils.SessionManagerMultiVendor;
-import com.memmcol.hes.repository.MeterRepository;
-import com.memmcol.hes.repository.ObisMappingRepository;
+import com.memmcol.hes.repository.ObisCodeRepository;
 import gurux.dlms.GXDLMSClient;
 import gurux.dlms.enums.ObjectType;
-import gurux.dlms.enums.Unit;
 import gurux.dlms.objects.GXDLMSDemandRegister;
 import gurux.dlms.objects.GXDLMSExtendedRegister;
 import gurux.dlms.objects.GXDLMSRegister;
@@ -25,11 +23,11 @@ import static com.memmcol.hesTraining.services.MeterReadingService.getUnitSymbol
 public class ObisScalerService {
 
     private final DlmsReaderUtils dlmsReaderUtils;
-    private final ObisMappingRepository obisMappingRepository;
+    private final ObisCodeRepository obisCodeRepository;
     private final SessionManagerMultiVendor sessionManagerMultiVendor;
 
     /**
-     * Update scaler & unit for all OBIS mappings of a given meter
+     * Update scaler & unit for all active OBIS codes of a given meter model
      * Returns JSON report of failures
      */
     public Map<String, Object> updateScalerUnitForMeter(String meterSerial, String model) throws Exception {
@@ -37,22 +35,14 @@ public class ObisScalerService {
         List<Map<String, Object>> failures = new ArrayList<>();
         int success = 0;
 
-        List<Integer> classIds = List.of(4, 3);
-        // Step 2: Get relevant OBIS mappings
-        List<ObisMapping> mappings = obisMappingRepository
-                .findByModelAndClassIdInAndAttributeIndex(
-                        model,
-                        classIds, // class_id IN (3,4)
-                        2                     // attribute_index
-                );
+        List<ObisCodeEntity> obisCodes = obisCodeRepository.findActiveByModel(model);
 
-        if (mappings.isEmpty()) {
-            log.warn("No OBIS mappings found for meter {} with model {}", meterSerial, model);
+        if (obisCodes.isEmpty()) {
+            log.warn("No active OBIS codes found for meter {} with model {}", meterSerial, model);
             report.put("status", "No OBIS mappings found");
             return report;
         }
 
-        // Step 3: Get DLMS client for this meter
         GXDLMSClient client = sessionManagerMultiVendor.getOrCreateClient(meterSerial);
         if (client == null) {
             log.error("No active DLMS session for meter: {}", meterSerial);
@@ -60,40 +50,51 @@ public class ObisScalerService {
             return report;
         }
 
-        // Step 4: Loop through mappings
-        for (ObisMapping mapping : mappings) {
+        for (ObisCodeEntity codeEntity : obisCodes) {
+            String fullCode = codeEntity.getCode();
+            String captureObis = fullCode;
+            int classId = 3; // Default to Register
+
+            if (fullCode != null && fullCode.contains(";")) {
+                String[] parts = fullCode.split(";");
+                if (parts.length >= 2) {
+                    try {
+                        classId = Integer.parseInt(parts[0].trim());
+                    } catch (NumberFormatException ignored) {}
+                    captureObis = parts[1].trim();
+                }
+            }
+
             try {
                 Map<String, Object> scalerUnit = readScalerUnit(
                         client,
                         meterSerial,
-                        mapping.getObisCode(),
-                        mapping.getClassId()
+                        captureObis,
+                        classId
                 );
 
                 double scaler = (double) scalerUnit.get("scaler");
                 String unit = (String) scalerUnit.get("units");
 
-                // Adjust for kilo units
                 if (Arrays.asList("KW", "KVA", "KVar", "KWh", "KVAh", "KVarh").contains(unit)) {
                     scaler = scaler / 1000.0;
                 }
 
-                // Update DB
-                mapping.setScaler(scaler);
-                mapping.setUnit(unit);
-                obisMappingRepository.save(mapping);
+                codeEntity.setScaler(String.valueOf(scaler));
+                codeEntity.setUnit(unit);
+                obisCodeRepository.save(codeEntity);
 
                 success++;
 
-                log.info("Updated {} for meter {}: scaler={}, unit={}", mapping.getObisCode(),
+                log.info("Updated {} for meter {}: scaler={}, unit={}", captureObis,
                         meterSerial, scaler, unit);
 
             } catch (Exception ex) {
                 log.error("Failed to read scaler/unit for OBIS {} on meter {}: {}",
-                        mapping.getObisCode(), meterSerial, ex.getMessage());
+                        captureObis, meterSerial, ex.getMessage());
                 failures.add(Map.of(
                         "meterSerial", meterSerial,
-                        "obisCode", mapping.getObisCode(),
+                        "obisCode", captureObis,
                         "error", ex.getMessage()
                 ));
             }
@@ -101,7 +102,7 @@ public class ObisScalerService {
 
         report.put("status", "Completed");
         report.put("meterSerial", meterSerial);
-        report.put("totalMappings", mappings.size());
+        report.put("totalMappings", obisCodes.size());
         report.put("success count", success);
         report.put("failures count", failures.size());
         report.put("failures", failures);
