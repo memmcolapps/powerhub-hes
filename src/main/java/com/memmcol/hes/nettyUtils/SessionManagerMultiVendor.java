@@ -128,16 +128,17 @@ public class SessionManagerMultiVendor {
 
     private Authentication parseAuthentication(String raw) {
         if (raw != null) {
+            String clean = raw.trim().toUpperCase();
             try {
-                return Authentication.valueOf(raw.toUpperCase().trim());
+                return Authentication.valueOf(clean);
             } catch (IllegalArgumentException e) {
-                if ("LOW_SECURITY".equalsIgnoreCase(raw.trim())) {
+                if ("LLS".equals(clean) || "LOW".equals(clean) || "LOW_SECURITY".equals(clean)) {
                     return Authentication.LOW;
-                } else if ("HIGH_SECURITY".equalsIgnoreCase(raw.trim())) {
+                } else if ("HLS".equals(clean) || "HIGH".equals(clean) || "HIGH_SECURITY".equals(clean)) {
                     return Authentication.HIGH;
-                } else if ("HIGH_GMAC".equalsIgnoreCase(raw.trim())) {
+                } else if ("HIGH_GMAC".equals(clean) || "GMAC".equals(clean)) {
                     return Authentication.HIGH_GMAC;
-                } else if ("NONE".equalsIgnoreCase(raw.trim())) {
+                } else if ("NONE".equals(clean) || "NO_SECURITY".equals(clean)) {
                     return Authentication.NONE;
                 }
                 log.warn("Unrecognized authentication_type in DB: {}", raw);
@@ -148,11 +149,14 @@ public class SessionManagerMultiVendor {
 
     private InterfaceType parseInterfaceType(String raw) {
         if (raw != null) {
+            String clean = raw.trim().toUpperCase();
             try {
-                return InterfaceType.valueOf(raw.toUpperCase().trim());
+                return InterfaceType.valueOf(clean);
             } catch (IllegalArgumentException e) {
-                if ("TCP".equalsIgnoreCase(raw.trim()) || "IP".equalsIgnoreCase(raw.trim())) {
+                if ("TCP".equals(clean) || "IP".equals(clean) || "DLMS/COSEM".equals(clean) || "DLMS".equals(clean) || "COSEM".equals(clean) || "WRAPPER".equals(clean)) {
                     return InterfaceType.WRAPPER;
+                } else if ("HDLC".equals(clean) || "SERIAL".equals(clean)) {
+                    return InterfaceType.HDLC;
                 }
                 log.warn("Unrecognized protocol/interface_type in DB: {}", raw);
             }

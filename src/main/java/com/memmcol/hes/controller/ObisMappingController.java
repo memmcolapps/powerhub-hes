@@ -1,15 +1,12 @@
 package com.memmcol.hes.controller;
 
 import com.memmcol.hes.service.ObisMappingImportService;
-import com.memmcol.hes.model.ObisMapping;
 import com.memmcol.hes.service.ObisScalerService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
-import org.springframework.web.multipart.MultipartFile;
 
-import java.util.List;
 import java.util.Map;
 
 @RestController

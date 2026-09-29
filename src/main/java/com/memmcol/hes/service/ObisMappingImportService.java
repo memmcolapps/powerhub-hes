@@ -1,11 +1,12 @@
 package com.memmcol.hes.service;
 
-import com.memmcol.hes.model.ObisMapping;
-import com.memmcol.hes.repository.ObisMappingRepository;
+import com.memmcol.hes.model.MeterIntegration;
+import com.memmcol.hes.model.ObisCodeEntity;
+import com.memmcol.hes.repository.MeterIntegrationRepository;
+import com.memmcol.hes.repository.ObisCodeRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
-import org.springframework.web.multipart.MultipartFile;
 
 import java.io.*;
 import java.util.*;
@@ -14,29 +15,41 @@ import java.util.*;
 @RequiredArgsConstructor
 @Slf4j
 public class ObisMappingImportService {
-    private final ObisMappingRepository obisMappingRepository;
+    private final ObisCodeRepository obisCodeRepository;
+    private final MeterIntegrationRepository meterIntegrationRepository;
 
     private static final String CSV_FILE_PATH = "./obis_mapping.csv";
 
     public Map<String, Object> importFromCsvFile(String model, boolean hexNotation) throws IOException {
-        List<ObisMapping> successfulImports = new ArrayList<>();
+        List<ObisCodeEntity> successfulImports = new ArrayList<>();
         int successCount = 0;
         int failureCount = 0;
         File file = new File(CSV_FILE_PATH);
         String line = "";
 
         if (!file.exists()) {
-            log.error("CSV file not found: {} ", CSV_FILE_PATH);
+            log.error("CSV file not found: {}", CSV_FILE_PATH);
             Map<String, Object> result = new HashMap<>();
-            result.put("error", "CSV file not found: {} "+ CSV_FILE_PATH);
+            result.put("error", "CSV file not found: " + CSV_FILE_PATH);
             result.put("successful_count", successCount);
             result.put("failed_count", failureCount);
-            result.put("successful_imports", Collections.EMPTY_LIST);
+            result.put("successful_imports", Collections.emptyList());
             return result;
         }
 
+        Optional<MeterIntegration> integrationOpt = meterIntegrationRepository.findByModelIgnoreCase(model);
+        if (integrationOpt.isEmpty()) {
+            log.error("Meter integration not found for model: {}", model);
+            Map<String, Object> result = new HashMap<>();
+            result.put("error", "Meter integration not found for model: " + model);
+            result.put("successful_count", successCount);
+            result.put("failed_count", failureCount);
+            result.put("successful_imports", Collections.emptyList());
+            return result;
+        }
+        MeterIntegration integration = integrationOpt.get();
+
         try (BufferedReader reader = new BufferedReader(new FileReader(file))) {
-//            String line;
             boolean firstLine = true;
 
             while ((line = reader.readLine()) != null) {
@@ -45,7 +58,7 @@ public class ObisMappingImportService {
                     continue;
                 }
 
-                String[] columns = line.split(",", -1); // keep empty strings
+                String[] columns = line.split(",", -1);
 
                 if (columns.length < 9) continue;
 
@@ -53,7 +66,6 @@ public class ObisMappingImportService {
                 int classId, attributeIndex;
 
                 if (hexNotation) {
-                    // columns[3] = class_id (e.g. "01"), columns[4] = hex OBIS code (e.g. "0100630100FF")
                     classId = Integer.parseInt(columns[3].trim());
                     String dotNotation = hexToDotNotation(columns[4].trim());
                     attributeIndex = Integer.parseInt(columns[5].trim());
@@ -64,35 +76,26 @@ public class ObisMappingImportService {
                     obisCodeCombined = classId + ";" + columns[4].trim() + ";" + attributeIndex + ";0";
                 }
 
-                boolean exists = obisMappingRepository.existsByModelAndObisCodeCombined(model, obisCodeCombined);
-                if (exists) {
-                    log.warn("Skipping duplicate entry for model={}, obis_code_combined={}", model, obisCodeCombined);
-                    failureCount++;
-                    continue;
-                }
-
-                ObisMapping obis = new ObisMapping();
-                obis.setClassId(classId);
-                obis.setModel(model);
-                obis.setObisCode(hexNotation ? hexToDotNotation(columns[4].trim()) : columns[4].trim());
-                obis.setAttributeIndex(attributeIndex);
-                obis.setDataIndex(0);
-                obis.setObisCodeCombined(obisCodeCombined);
-                obis.setDataType(columns[6].trim());
+                ObisCodeEntity obis = new ObisCodeEntity();
+                obis.setId(UUID.randomUUID());
+                obis.setMeterIntegration(integration);
+                obis.setAction(columns[1].isBlank() ? columns[2].trim() : columns[1].trim());
+                obis.setCode(obisCodeCombined);
                 obis.setDescription(columns[2].trim());
-                obis.setGroupName(columns[1].trim());
-
-                obis.setScaler(columns[7].isBlank() ? null : Double.parseDouble(columns[7].trim()));
+                obis.setStatus("ACTIVE");
+                obis.setObisType("REAL_TIME");
+                obis.setScaler(columns[7].isBlank() ? null : columns[7].trim());
                 obis.setUnit(columns.length > 8 ? columns[8].trim() : null);
+                obis.setMultiplyBy("NONE");
 
-                obisMappingRepository.save(obis);
+                obisCodeRepository.save(obis);
                 successfulImports.add(obis);
                 successCount++;
             }
         } catch (IOException ex) {
             log.error("Error reading CSV on line {} : {}", line, ex.getMessage());
             Map<String, Object> result = new HashMap<>();
-            result.put("Error: ", "Error reading CSV on line " + line + " : " + ex.getMessage());
+            result.put("Error", "Error reading CSV on line " + line + " : " + ex.getMessage());
             result.put("successful_count", successCount);
             result.put("failed_count", failureCount);
             result.put("successful_imports", successfulImports);
@@ -100,7 +103,7 @@ public class ObisMappingImportService {
         } catch (Exception e) {
             log.error("Error parsing CSV on line {} : {}", line, e.getMessage());
             Map<String, Object> result = new HashMap<>();
-            result.put("Error: ", "Error parsing CSV on line " + line + " : " + e.getMessage());
+            result.put("Error", "Error parsing CSV on line " + line + " : " + e.getMessage());
             result.put("successful_count", successCount);
             result.put("failed_count", failureCount);
             result.put("successful_imports", successfulImports);
@@ -116,9 +119,6 @@ public class ObisMappingImportService {
         return result;
     }
 
-    /**
-     * Convert hex OBIS notation (e.g., "0100630100FF") to dot notation (e.g., "1.0.99.1.0.255")
-     */
     private String hexToDotNotation(String hex) {
         if (hex.length() != 12) throw new IllegalArgumentException("Hex OBIS code must be 12 characters");
 
@@ -130,5 +130,4 @@ public class ObisMappingImportService {
         }
         return String.join(".", parts);
     }
-
 }

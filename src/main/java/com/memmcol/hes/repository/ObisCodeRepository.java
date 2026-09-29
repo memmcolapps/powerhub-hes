@@ -23,4 +23,26 @@ public interface ObisCodeRepository extends JpaRepository<ObisCodeEntity, java.u
             @Param("model") String model,
             @Param("action") String action
     );
+
+    @Query("""
+        SELECT o FROM ObisCodeEntity o
+        JOIN o.meterIntegration mi
+        WHERE UPPER(mi.model) = UPPER(:model)
+          AND o.status = 'ACTIVE'
+    """)
+    List<ObisCodeEntity> findActiveByModel(
+            @Param("model") String model
+    );
+
+    @Query("""
+        SELECT o FROM ObisCodeEntity o
+        JOIN o.meterIntegration mi
+        WHERE UPPER(mi.model) = UPPER(:model)
+          AND UPPER(o.obisType) = UPPER(:obisType)
+          AND o.status = 'ACTIVE'
+    """)
+    List<ObisCodeEntity> findActiveByModelAndObisType(
+            @Param("model") String model,
+            @Param("obisType") String obisType
+    );
 }
