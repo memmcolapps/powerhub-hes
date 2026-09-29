@@ -94,7 +94,7 @@ public class ObisMappingService {
 
     @PostConstruct
     public void preloadObisMappings() {
-        List<ObisCodeEntity> allObisCodes = obisCodeRepository.findAll();
+        List<ObisCodeEntity> allObisCodes = obisCodeRepository.findAllWithMeterIntegration();
 
         Map<String, List<ObisCodeEntity>> mappingsByModel = allObisCodes.stream()
                 .filter(o -> "ACTIVE".equalsIgnoreCase(o.getStatus())
