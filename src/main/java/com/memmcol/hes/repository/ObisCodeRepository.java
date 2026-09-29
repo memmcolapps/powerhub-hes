@@ -14,6 +14,12 @@ public interface ObisCodeRepository extends JpaRepository<ObisCodeEntity, java.u
 
     @Query("""
         SELECT o FROM ObisCodeEntity o
+        JOIN FETCH o.meterIntegration mi
+    """)
+    List<ObisCodeEntity> findAllWithMeterIntegration();
+
+    @Query("""
+        SELECT o FROM ObisCodeEntity o
         JOIN o.meterIntegration mi
         WHERE UPPER(o.action) = UPPER(:action)
           AND UPPER(mi.model) = UPPER(:model)
