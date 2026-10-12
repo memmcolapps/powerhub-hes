@@ -79,7 +79,32 @@ class ObisConfirmationServiceTest {
         when(profileMetadataService.loadFromMeterAndPersist("202006001314", "MMX-313-CT", "1.0.99.1.0.255"))
                 .thenReturn(List.of(metadata));
 
-        Map<String, Object> result = obisConfirmationService.confirmObisCodes(meterId.toString());
+        Map<String, Object> result = obisConfirmationService.confirmObisCodes(meterId.toString(), null);
+
+        assertNotNull(result);
+        assertEquals("CONFIRMED", result.get("overallStatus"));
+        assertEquals("CONFIRMED", testObisCode.getConfirmation());
+        assertEquals("SUCCESS", testObisCode.getResponse());
+        verify(obisCodeRepository, times(1)).save(testObisCode);
+    }
+
+    @Test
+    @DisplayName("confirmObisCodes with specific target OBIS code should update that specific code")
+    void confirmObisCodes_SpecificObisCode_Success() {
+        when(meterRepository.findById(meterId)).thenReturn(Optional.of(testMeter));
+        when(obisCodeRepository.findActiveByModel("MMX-313-CT")).thenReturn(List.of(testObisCode));
+        when(obisCodeRepository.findById(obisId)).thenReturn(Optional.of(testObisCode));
+
+        ModelProfileMetadata metadata = ModelProfileMetadata.builder()
+                .meterModel("MMX-313-CT")
+                .profileObis("1.0.99.1.0.255")
+                .captureObis("0.0.1.0.0.255")
+                .build();
+
+        when(profileMetadataService.loadFromMeterAndPersist("202006001314", "MMX-313-CT", "1.0.99.1.0.255"))
+                .thenReturn(List.of(metadata));
+
+        Map<String, Object> result = obisConfirmationService.confirmObisCodes(meterId.toString(), "1.0.99.1.0.255");
 
         assertNotNull(result);
         assertEquals("CONFIRMED", result.get("overallStatus"));
@@ -98,7 +123,7 @@ class ObisConfirmationServiceTest {
         when(profileMetadataService.loadFromMeterAndPersist("202006001314", "MMX-313-CT", "1.0.99.1.0.255"))
                 .thenThrow(new RuntimeException("Connection timeout with meter"));
 
-        Map<String, Object> result = obisConfirmationService.confirmObisCodes(meterId.toString());
+        Map<String, Object> result = obisConfirmationService.confirmObisCodes(meterId.toString(), null);
 
         assertNotNull(result);
         assertEquals("FAILED", result.get("overallStatus"));
@@ -114,6 +139,6 @@ class ObisConfirmationServiceTest {
         when(meterRepository.findByMeterNumber(meterId.toString())).thenReturn(Optional.empty());
 
         assertThrows(IllegalArgumentException.class, () ->
-                obisConfirmationService.confirmObisCodes(meterId.toString()));
+                obisConfirmationService.confirmObisCodes(meterId.toString(), null));
     }
 }
