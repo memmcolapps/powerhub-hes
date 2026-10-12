@@ -27,10 +27,11 @@ public class ObisConfirmationService {
      * Upserts profile metadata and updates hierarchical confirmation status on the obis_codes table.
      *
      * @param meterIdentifier meter UUID string or meter serial number
+     * @param targetObisCode optional specific OBIS code to confirm (if null or blank, confirms all profile OBIS codes for the model)
      * @return Map containing confirmation summary and status
      */
-    public Map<String, Object> confirmObisCodes(String meterIdentifier) {
-        log.info("Starting OBIS code confirmation process for meter identifier: {}", meterIdentifier);
+    public Map<String, Object> confirmObisCodes(String meterIdentifier, String targetObisCode) {
+        log.info("Starting OBIS code confirmation process for meter identifier: {}, targetObisCode: {}", meterIdentifier, targetObisCode);
 
         Meter meter = findMeter(meterIdentifier);
         if (meter == null) {
@@ -49,11 +50,21 @@ public class ObisConfirmationService {
             throw new IllegalStateException("No active OBIS codes configured for meter model: " + meterModel);
         }
 
-        List<ObisCodeEntity> profileObisEntities = obisEntities.stream()
-                .filter(o -> "PROFILE".equalsIgnoreCase(o.getObisType()) || "PROFILE_GENERIC".equalsIgnoreCase(o.getObisType()))
-                .toList();
-
-        List<ObisCodeEntity> targetObisList = profileObisEntities.isEmpty() ? obisEntities : profileObisEntities;
+        List<ObisCodeEntity> targetObisList;
+        if (targetObisCode != null && !targetObisCode.trim().isEmpty()) {
+            String trimmedObis = targetObisCode.trim();
+            targetObisList = obisEntities.stream()
+                    .filter(o -> trimmedObis.equalsIgnoreCase(o.getCode()))
+                    .toList();
+            if (targetObisList.isEmpty()) {
+                throw new IllegalArgumentException("OBIS code '" + targetObisCode + "' is not active or configured for model: " + meterModel);
+            }
+        } else {
+            List<ObisCodeEntity> profileObisEntities = obisEntities.stream()
+                    .filter(o -> "PROFILE".equalsIgnoreCase(o.getObisType()) || "PROFILE_GENERIC".equalsIgnoreCase(o.getObisType()))
+                    .toList();
+            targetObisList = profileObisEntities.isEmpty() ? obisEntities : profileObisEntities;
+        }
 
         Map<String, Object> responseMap = new LinkedHashMap<>();
         responseMap.put("meterId", meter.getId());

@@ -50,9 +50,11 @@ public class ObisMappingController {
     }
 
     @PostMapping("/{meterId}/confirm-obis")
-    public ResponseEntity<?> confirmObisCodes(@PathVariable String meterId) {
+    public ResponseEntity<?> confirmObisCodes(
+            @PathVariable String meterId,
+            @RequestParam(required = false) String obisCode) {
         try {
-            Map<String, Object> response = confirmationService.confirmObisCodes(meterId);
+            Map<String, Object> response = confirmationService.confirmObisCodes(meterId, obisCode);
             return ResponseEntity.ok(response);
         } catch (IllegalArgumentException ex) {
             return ResponseEntity.status(HttpStatus.NOT_FOUND).body(Map.of("error", ex.getMessage()));
