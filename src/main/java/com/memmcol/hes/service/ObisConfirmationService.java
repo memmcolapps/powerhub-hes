@@ -53,8 +53,10 @@ public class ObisConfirmationService {
         List<ObisCodeEntity> targetObisList;
         if (targetObisCode != null && !targetObisCode.trim().isEmpty()) {
             String trimmedObis = targetObisCode.trim();
+            String pureTargetObis = ProfileMetadataService.parsePureObis(trimmedObis);
             targetObisList = obisEntities.stream()
-                    .filter(o -> trimmedObis.equalsIgnoreCase(o.getCode()))
+                    .filter(o -> trimmedObis.equalsIgnoreCase(o.getCode())
+                            || pureTargetObis.equalsIgnoreCase(ProfileMetadataService.parsePureObis(o.getCode())))
                     .toList();
             if (targetObisList.isEmpty()) {
                 throw new IllegalArgumentException("OBIS code '" + targetObisCode + "' is not active or configured for model: " + meterModel);

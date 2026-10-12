@@ -7,7 +7,7 @@ import com.memmcol.hes.domain.profile.ObisObjectType;
 import com.memmcol.hes.exception.AssociationLostException;
 import com.memmcol.hes.infrastructure.dlms.DlmsReaderUtils;
 import com.memmcol.hes.model.ModelProfileMetadata;
-import com.memmcol.hes.nettyUtils.SessionManager;
+import com.memmcol.hes.nettyUtils.SessionManagerMultiVendor;
 import com.memmcol.hes.repository.ModelProfileMetadataRepository;
 import gurux.dlms.GXDLMSClient;
 import gurux.dlms.GXReplyData;
@@ -30,7 +30,7 @@ public class ProfileMetadataService {
     private static final String EVENT_LOG_PREFIX = "0.0.99.98.";
     private final CacheManager cacheManager;                       // ← Caffeine
     private final ModelProfileMetadataRepository repo;             // ← JPA
-    private final SessionManager sessionManager;
+    private final SessionManagerMultiVendor sessionManager;
     private final DlmsReaderUtils dlmsReaderUtils;
     private final ObisMappingService obisMappingService;
 
@@ -149,6 +149,22 @@ public class ProfileMetadataService {
             Objects.requireNonNull(cacheManager.getCache(CACHE)).put(key, fresh);
         }
         return fresh;
+    }
+
+    public static String parsePureObis(String obisCode) {
+        if (obisCode == null || obisCode.trim().isEmpty()) {
+            return obisCode;
+        }
+        String trimmed = obisCode.trim();
+        if (trimmed.contains(";")) {
+            String[] parts = trimmed.split(";");
+            for (String part : parts) {
+                if (part.contains(".")) {
+                    return part.trim();
+                }
+            }
+        }
+        return trimmed;
     }
 
     private static boolean isEventLogProfileObis(String profileObis) {
@@ -424,12 +440,14 @@ public class ProfileMetadataService {
     public List<ModelProfileMetadata> loadFromMeterAndPersist(
             String meterSerial,
             String meterModel,
-            String profileObis) {
+            String profileObisRaw) {
+
+        String profileObis = parsePureObis(profileObisRaw);
 
         try {
             String msg = String.format(
-                    "Reading capture objects, scaler and units for model=%s meter=%s obis=%s",
-                    meterModel, meterSerial, profileObis);
+                    "Reading capture objects, scaler and units for model=%s meter=%s obis=%s (raw: %s)",
+                    meterModel, meterSerial, profileObis, profileObisRaw);
             log.info(msg);
             logTx(meterSerial, msg);
 
