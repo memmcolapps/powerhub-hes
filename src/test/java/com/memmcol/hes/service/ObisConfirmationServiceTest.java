@@ -89,6 +89,39 @@ class ObisConfirmationServiceTest {
     }
 
     @Test
+    @DisplayName("confirmObisCodes with semicolon-delimited OBIS code should match and update correctly")
+    void confirmObisCodes_SemicolonDelimitedObisCode_Success() {
+        ObisCodeEntity semicolonEntity = new ObisCodeEntity();
+        semicolonEntity.setId(obisId);
+        semicolonEntity.setCode("7;1.0.99.1.0.255;2;0");
+        semicolonEntity.setAction("PROFILE_GENERIC");
+        semicolonEntity.setObisType("PROFILE");
+        semicolonEntity.setStatus("ACTIVE");
+        semicolonEntity.setConfirmation("PENDING");
+
+        when(meterRepository.findById(meterId)).thenReturn(Optional.of(testMeter));
+        when(obisCodeRepository.findActiveByModel("MMX-313-CT")).thenReturn(List.of(semicolonEntity));
+        when(obisCodeRepository.findById(obisId)).thenReturn(Optional.of(semicolonEntity));
+
+        ModelProfileMetadata metadata = ModelProfileMetadata.builder()
+                .meterModel("MMX-313-CT")
+                .profileObis("1.0.99.1.0.255")
+                .captureObis("0.0.1.0.0.255")
+                .build();
+
+        when(profileMetadataService.loadFromMeterAndPersist("202006001314", "MMX-313-CT", "7;1.0.99.1.0.255;2;0"))
+                .thenReturn(List.of(metadata));
+
+        Map<String, Object> result = obisConfirmationService.confirmObisCodes(meterId.toString(), "1.0.99.1.0.255");
+
+        assertNotNull(result);
+        assertEquals("CONFIRMED", result.get("overallStatus"));
+        assertEquals("CONFIRMED", semicolonEntity.getConfirmation());
+        assertEquals("SUCCESS", semicolonEntity.getResponse());
+        verify(obisCodeRepository, times(1)).save(semicolonEntity);
+    }
+
+    @Test
     @DisplayName("confirmObisCodes with specific target OBIS code should update that specific code")
     void confirmObisCodes_SpecificObisCode_Success() {
         when(meterRepository.findById(meterId)).thenReturn(Optional.of(testMeter));
