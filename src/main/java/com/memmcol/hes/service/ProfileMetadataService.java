@@ -7,7 +7,7 @@ import com.memmcol.hes.domain.profile.ObisObjectType;
 import com.memmcol.hes.exception.AssociationLostException;
 import com.memmcol.hes.infrastructure.dlms.DlmsReaderUtils;
 import com.memmcol.hes.model.ModelProfileMetadata;
-import com.memmcol.hes.nettyUtils.SessionManager;
+import com.memmcol.hes.nettyUtils.SessionManagerMultiVendor;
 import com.memmcol.hes.repository.ModelProfileMetadataRepository;
 import gurux.dlms.GXDLMSClient;
 import gurux.dlms.GXReplyData;
@@ -30,12 +30,37 @@ public class ProfileMetadataService {
     private static final String EVENT_LOG_PREFIX = "0.0.99.98.";
     private final CacheManager cacheManager;                       // ← Caffeine
     private final ModelProfileMetadataRepository repo;             // ← JPA
-    private final SessionManager sessionManager;
+    private final SessionManagerMultiVendor sessionManager;
     private final DlmsReaderUtils dlmsReaderUtils;
     private final ObisMappingService obisMappingService;
 
     @org.springframework.beans.factory.annotation.Value("${hes.metadata.refresh.enabled:true}")
     private boolean refreshEnabled;
+
+    /**
+     * Direct database retrieval method for confirmed profile metadata.
+     * Checks Caffeine cache first, then directly queries the DB without live meter communication.
+     */
+    @SuppressWarnings("unchecked")
+    public List<ModelProfileMetadata> getProfileMetadataFromDb(String meterModel, String profileObis) {
+        String key = meterModel + "::" + profileObis;
+        var cache = cacheManager.getCache(CACHE);
+        if (cache != null) {
+            List<ModelProfileMetadata> cached = cache.get(key, List.class);
+            if (cached != null && !cached.isEmpty()) {
+                log.info("📗 Caffeine cache hit for DB-first metadata lookup: {}", key);
+                return cached;
+            }
+        }
+
+        List<ModelProfileMetadata> dbRows =
+                repo.findByMeterModelAndProfileObisOrderByCaptureIndexAsc(meterModel, profileObis);
+        if (!dbRows.isEmpty() && cache != null) {
+            log.info("📙 Direct DB hit for profile metadata: {} ({} rows)", key, dbRows.size());
+            cache.put(key, dbRows);
+        }
+        return dbRows;
+    }
 
     /**
      * Return metadata for a given meter model & profile OBIS.
@@ -124,6 +149,22 @@ public class ProfileMetadataService {
             Objects.requireNonNull(cacheManager.getCache(CACHE)).put(key, fresh);
         }
         return fresh;
+    }
+
+    public static String parsePureObis(String obisCode) {
+        if (obisCode == null || obisCode.trim().isEmpty()) {
+            return obisCode;
+        }
+        String trimmed = obisCode.trim();
+        if (trimmed.contains(";")) {
+            String[] parts = trimmed.split(";");
+            for (String part : parts) {
+                if (part.contains(".")) {
+                    return part.trim();
+                }
+            }
+        }
+        return trimmed;
     }
 
     private static boolean isEventLogProfileObis(String profileObis) {
@@ -399,12 +440,14 @@ public class ProfileMetadataService {
     public List<ModelProfileMetadata> loadFromMeterAndPersist(
             String meterSerial,
             String meterModel,
-            String profileObis) {
+            String profileObisRaw) {
+
+        String profileObis = parsePureObis(profileObisRaw);
 
         try {
             String msg = String.format(
-                    "Reading capture objects, scaler and units for model=%s meter=%s obis=%s",
-                    meterModel, meterSerial, profileObis);
+                    "Reading capture objects, scaler and units for model=%s meter=%s obis=%s (raw: %s)",
+                    meterModel, meterSerial, profileObis, profileObisRaw);
             log.info(msg);
             logTx(meterSerial, msg);
 
@@ -491,10 +534,20 @@ public class ProfileMetadataService {
                 rows.add(row);
             }
 
-            // ── 4. Persist ────────────────────────────────────────────────────────
-            repo.saveAll(rows);
-            log.info("💾 Successfully persisted {} metadata rows for meter {}/profile {}",
-                    rows.size(), meterSerial, profileObis);
+            // ── 4. Persist (Idempotent Upsert logic) ──────────────────────────────
+            if (!rows.isEmpty()) {
+                List<ModelProfileMetadata> existing =
+                        repo.findByMeterModelAndProfileObisOrderByCaptureIndexAsc(meterModel, profileObis);
+                if (!existing.isEmpty()) {
+                    repo.deleteAll(existing);
+                    repo.flush();
+                    log.info("Cleared {} existing metadata row(s) for model={} profile={} before upserting fresh metadata",
+                            existing.size(), meterModel, profileObis);
+                }
+                repo.saveAll(rows);
+                log.info("💾 Successfully persisted {} metadata rows for meter {}/profile {}",
+                        rows.size(), meterSerial, profileObis);
+            }
 
             return rows;
 

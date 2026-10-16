@@ -44,4 +44,10 @@ public class ObisCodeEntity {
 
     @Column(name = "action_type", length = 50)
     private String actionType;
+
+    @Column(name = "confirmation", length = 50)
+    private String confirmation = "PENDING";
+
+    @Column(name = "response", length = 1000)
+    private String response;
 }
