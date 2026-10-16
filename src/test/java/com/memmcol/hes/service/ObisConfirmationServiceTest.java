@@ -166,12 +166,13 @@ class ObisConfirmationServiceTest {
     }
 
     @Test
-    @DisplayName("confirmObisCodes should throw IllegalArgumentException when meter is not found")
-    void confirmObisCodes_MeterNotFound() {
+    @DisplayName("confirmObisCodes should throw IllegalStateException when no OBIS codes exist in database")
+    void confirmObisCodes_NoObisCodesInDatabase() {
         when(meterRepository.findById(meterId)).thenReturn(Optional.empty());
         when(meterRepository.findByMeterNumber(meterId.toString())).thenReturn(Optional.empty());
+        when(obisCodeRepository.findAll()).thenReturn(Collections.emptyList());
 
-        assertThrows(IllegalArgumentException.class, () ->
+        assertThrows(IllegalStateException.class, () ->
                 obisConfirmationService.confirmObisCodes(meterId.toString(), null));
     }
 }
