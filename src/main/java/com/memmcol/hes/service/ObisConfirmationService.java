@@ -34,20 +34,17 @@ public class ObisConfirmationService {
         log.info("Starting OBIS code confirmation process for meter identifier: {}, targetObisCode: {}", meterIdentifier, targetObisCode);
 
         Meter meter = findMeter(meterIdentifier);
-        if (meter == null) {
-            throw new IllegalArgumentException("Meter not found for identifier: " + meterIdentifier);
-        }
+        String meterSerial = (meter != null) ? meter.getMeterNumber() : meterIdentifier;
+        String meterModel = (meter != null && meter.getMeterIntegration() != null)
+                ? meter.getMeterIntegration().getModel()
+                : null;
 
-        String meterSerial = meter.getMeterNumber();
-        if (meter.getMeterIntegration() == null) {
-            throw new IllegalStateException("Meter " + meterSerial + " is not associated with any meter integration");
-        }
-
-        String meterModel = meter.getMeterIntegration().getModel();
-        List<ObisCodeEntity> obisEntities = obisCodeRepository.findActiveByModel(meterModel);
+        List<ObisCodeEntity> obisEntities = (meterModel != null)
+                ? obisCodeRepository.findActiveByModel(meterModel)
+                : obisCodeRepository.findAll();
 
         if (obisEntities.isEmpty()) {
-            throw new IllegalStateException("No active OBIS codes configured for meter model: " + meterModel);
+            throw new IllegalStateException("No OBIS codes configured in the database for meter identifier: " + meterIdentifier);
         }
 
         List<ObisCodeEntity> targetObisList;
@@ -69,7 +66,7 @@ public class ObisConfirmationService {
         }
 
         Map<String, Object> responseMap = new LinkedHashMap<>();
-        responseMap.put("meterId", meter.getId());
+        responseMap.put("meterId", (meter != null) ? meter.getId() : null);
         responseMap.put("meterSerial", meterSerial);
         responseMap.put("meterModel", meterModel);
 
